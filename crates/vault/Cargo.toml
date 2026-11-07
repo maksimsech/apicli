@@ -1,0 +1,17 @@
+[package]
+name = "apicli-vault"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+apicli-core.workspace = true
+aws-lc-rs = "1.19"
+directories = "6.0"
+secrecy.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zeroize = "1.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"

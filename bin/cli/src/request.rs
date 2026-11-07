@@ -1,43 +1,50 @@
 use std::{
     collections::HashSet,
     fs,
-    io::{Read, stdin},
-    process::ExitCode,
+    io::{Read, Write, stdin, stdout},
     time::{Duration, Instant},
 };
 
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_encode};
+use apicli_core::{Credential, Denial, READ_METHODS, Redactor, UNRESERVED, Vault, authorize};
+use apicli_vault::Store;
+use percent_encoding::percent_encode;
 use reqwest::{
-    Client, Method,
-    header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, REFERER, USER_AGENT},
+    Client, Method, Response,
+    header::{
+        ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, LOCATION, REFERER, USER_AGENT,
+    },
     redirect::Policy,
 };
+use secrecy::ExposeSecret;
 use url::{ParseError, Url};
 
-use crate::{cli::RequestArgs, failure::Failure, response};
+use crate::{admin::add_hint, cli::RequestArgs, failure::Failure, response};
 
-const UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
+pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
+    let vault = Store::open()?.load()?;
+    perform(&args, &vault, &mut stdout().lock()).await
+}
 
-pub async fn send(args: RequestArgs) -> Result<ExitCode, Failure> {
+pub async fn perform(
+    args: &RequestArgs,
+    vault: &Vault,
+    stdout: &mut dyn Write,
+) -> Result<u8, Failure> {
     let mut url = parse_url(args.url.as_deref().unwrap_or_default())?;
-    let form = form_parts(&args)?;
+    let form = form_parts(args)?;
     let json = if args.json.is_empty() {
         None
     } else {
-        Some(json_body(&args)?)
+        Some(json_body(args)?)
     };
     if json.is_some() && !form.is_empty() {
         return Err(Failure::Usage(
             "--json can't be combined with -d or --data-* options".into(),
         ));
     }
-    let method = method(&args, json.is_some() || !form.is_empty())?;
-    let mut headers = default_headers(&args)?;
-    let body = match json {
+    let mut method = method(args, json.is_some() || !form.is_empty())?;
+    let mut headers = default_headers(args)?;
+    let mut body = match json {
         Some(json) => {
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
             headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
@@ -57,21 +64,123 @@ pub async fn send(args: RequestArgs) -> Result<ExitCode, Failure> {
         }
     };
     apply_custom_headers(&mut headers, &args.headers)?;
-    let client = client(&args)?;
-    if args.verbose {
-        eprintln!("> {method} {url}");
-        for (name, value) in &headers {
-            eprintln!("> {name}: {}", String::from_utf8_lossy(value.as_bytes()));
-        }
-        eprintln!(">");
-    }
+    let client = client(args)?;
+    let redactor = Redactor::new(vault.secrets());
     let started = Instant::now();
-    let mut request = client.request(method.clone(), url).headers(headers);
-    if let Some(body) = body {
-        request = request.body(body);
+    let mut redirects = 0;
+    loop {
+        let credential = authorize(&url, method.as_str(), &vault.credentials)
+            .map_err(|denial| denied(denial, vault))?;
+        let request_headers = with_credential(&headers, credential)?;
+        if args.verbose {
+            for line in request_lines(&method, &url, &request_headers) {
+                eprintln!(
+                    "{}",
+                    String::from_utf8_lossy(&redactor.redact(line.as_bytes()))
+                );
+            }
+        }
+        let mut request = client
+            .request(method.clone(), url.clone())
+            .headers(request_headers);
+        if let Some(body) = &body {
+            request = request.body(body.clone());
+        }
+        let response = request.send().await?;
+        let next = if args.location {
+            redirect_target(&response)
+        } else {
+            None
+        };
+        let Some(next) = next else {
+            return response::write(response, args, &method, started, redactor, stdout).await;
+        };
+        if redirects == args.max_redirs {
+            return Err(Failure::Redirects(redirects));
+        }
+        redirects += 1;
+        if args.verbose {
+            response::print_head(&response, &redactor);
+        }
+        let status = response.status().as_u16();
+        if status == 303 && method != Method::HEAD
+            || matches!(status, 301 | 302) && method == Method::POST
+        {
+            method = Method::GET;
+            body = None;
+        }
+        url = next;
     }
-    let response = request.send().await?;
-    response::write(response, &args, &method, started).await
+}
+
+fn redirect_target(response: &Response) -> Option<Url> {
+    if !response.status().is_redirection() {
+        return None;
+    }
+    let location = response.headers().get(LOCATION)?.to_str().ok()?;
+    response.url().join(location).ok()
+}
+
+fn denied(denial: Denial, vault: &Vault) -> Failure {
+    match denial {
+        Denial::Userinfo => Failure::Url("credentials in the URL are not allowed".into()),
+        Denial::EncodedSeparator => {
+            Failure::Url("an encoded / or \\ in the URL path is not allowed".into())
+        }
+        Denial::Method { method, origin } => Failure::Denied(format!(
+            "denied: {method} is not allowed on {origin}. Allowed: {}",
+            READ_METHODS.join(", ")
+        )),
+        Denial::Unconfigured(origin) => {
+            let configured = vault
+                .credentials
+                .iter()
+                .map(|credential| credential.origin.to_string())
+                .collect::<Vec<_>>();
+            let known = if configured.is_empty() {
+                "No hosts are configured yet.".to_string()
+            } else {
+                format!("Configured: {}.", configured.join(", "))
+            };
+            Failure::Unconfigured(format!(
+                "{origin} is not configured. {known} The user can add it with: {}",
+                add_hint(&origin)
+            ))
+        }
+    }
+}
+
+fn with_credential(headers: &HeaderMap, credential: &Credential) -> Result<HeaderMap, Failure> {
+    let name = HeaderName::from_bytes(credential.header.as_bytes()).map_err(|_| {
+        Failure::Integrity(format!("{} has an invalid header name", credential.name))
+    })?;
+    if headers.contains_key(&name) {
+        return Err(Failure::Usage(format!(
+            "{} is added by apicli for {}, remove -H {}",
+            credential.header, credential.origin, credential.header
+        )));
+    }
+    let mut value = HeaderValue::from_str(credential.value().expose_secret()).map_err(|_| {
+        Failure::Integrity(format!("{} has an invalid header value", credential.name))
+    })?;
+    value.set_sensitive(true);
+    let mut headers = headers.clone();
+    headers.insert(name, value);
+    Ok(headers)
+}
+
+fn request_lines(method: &Method, url: &Url, headers: &HeaderMap) -> Vec<String> {
+    let mut lines = vec![format!("> {method} {url}")];
+    for (name, value) in headers {
+        let shown = if value.is_sensitive() {
+            "[redacted]".to_string()
+        } else {
+            String::from_utf8_lossy(value.as_bytes()).into_owned()
+        };
+        lines.push(format!("> {name}: {shown}"));
+    }
+    lines.push(">".into());
+    lines
 }
 
 fn parse_url(raw: &str) -> Result<Url, Failure> {
@@ -224,4 +333,26 @@ fn client(args: &RequestArgs) -> Result<Client, Failure> {
 fn duration(seconds: f64, flag: &str) -> Result<Duration, Failure> {
     Duration::try_from_secs_f64(seconds)
         .map_err(|_| Failure::Usage(format!("{flag} must be a positive number of seconds")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbose_lines_hide_injected_header() {
+        let mut value = HeaderValue::from_static("Bearer sk_live_1234567890");
+        value.set_sensitive(true);
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", value);
+
+        let lines = request_lines(
+            &Method::GET,
+            &Url::parse("https://api.example.com/").unwrap(),
+            &headers,
+        );
+
+        assert!(lines.contains(&"> authorization: [redacted]".to_string()));
+        assert!(!lines.concat().contains("sk_live_1234567890"));
+    }
 }

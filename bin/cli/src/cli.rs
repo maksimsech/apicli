@@ -27,11 +27,37 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    #[command(about = "List configured hosts and what is allowed on them")]
+    Hosts {
+        #[arg(long, help = "Print JSON")]
+        json: bool,
+    },
+    #[command(about = "Manage stored secrets (run by the user in a terminal)")]
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
     #[command(about = "The agent skill for apicli")]
     Skill {
         #[command(subcommand)]
         command: SkillCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SecretCommand {
+    #[command(about = "Store a secret bound to one host")]
+    Add {
+        name: String,
+        #[arg(long, help = "Host the secret is sent to, like api.example.com")]
+        host: String,
+        #[arg(long, help = "Header template, like 'Authorization: Bearer {secret}'")]
+        header: String,
+    },
+    #[command(about = "Replace a stored secret")]
+    Rotate { name: String },
+    #[command(about = "Delete a stored secret")]
+    Rm { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -122,6 +148,15 @@ pub struct RequestArgs {
     pub user_agent: Option<String>,
     #[arg(short = 'e', long, value_name = "URL", help = "Referer header")]
     pub referer: Option<String>,
+    #[arg(short = 'L', long, help = "Follow redirects, checking every hop")]
+    pub location: bool,
+    #[arg(
+        long,
+        value_name = "COUNT",
+        default_value_t = 50,
+        help = "Maximum redirects to follow"
+    )]
+    pub max_redirs: u32,
     #[arg(
         short = 'v',
         long,
@@ -206,6 +241,12 @@ const REFUSED: &[Refused] = &[
     },
     Refused {
         short: None,
+        long: "location-trusted",
+        value: false,
+        reason: "credentials never follow redirects to other hosts",
+    },
+    Refused {
+        short: None,
         long: "next",
         value: false,
         reason: "apicli sends one request per call",
@@ -227,12 +268,6 @@ const REFUSED: &[Refused] = &[
         long: "cookie-jar",
         value: true,
         reason: "cookies are not kept or sent",
-    },
-    Refused {
-        short: Some('L'),
-        long: "location",
-        value: false,
-        reason: "redirects are not followed yet",
     },
     Refused {
         short: Some('F'),

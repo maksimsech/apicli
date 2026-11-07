@@ -1,0 +1,12 @@
+[package]
+name = "apicli-core"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+percent-encoding.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+url.workspace = true

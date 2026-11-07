@@ -1,10 +1,10 @@
 use std::{
     fs::File,
-    io::{self, BufWriter, Write, stdout},
-    process::ExitCode,
+    io::{self, BufWriter, Write},
     time::Instant,
 };
 
+use apicli_core::Redactor;
 use reqwest::{Method, Response, Version, header::CONTENT_TYPE};
 
 use crate::{cli::RequestArgs, failure::Failure};
@@ -14,35 +14,51 @@ pub async fn write(
     args: &RequestArgs,
     method: &Method,
     started: Instant,
-) -> Result<ExitCode, Failure> {
+    mut redactor: Redactor,
+    stdout: &mut dyn Write,
+) -> Result<u8, Failure> {
     let status = response.status();
     let failed = status.is_client_error() || status.is_server_error();
     let quiet = failed && args.fail && !args.fail_with_body;
-    let head = head(&response);
     if args.verbose {
-        for line in head.lines() {
-            eprintln!("< {line}");
-        }
+        print_head(&response, &redactor);
     }
+    let head = redactor.redact(head(&response).as_bytes());
     let url = response.url().to_string();
     let content_type = response
         .headers()
         .get(CONTENT_TYPE)
         .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
         .unwrap_or_default();
-    let mut out = output(args)?;
-    if (args.include || args.head) && !quiet {
-        out.write_all(head.as_bytes()).map_err(write_failure)?;
-    }
-    let mut size = 0;
-    while let Some(chunk) = response.chunk().await? {
-        size += chunk.len();
-        if !quiet {
-            out.write_all(&chunk).map_err(write_failure)?;
+    let mut file = match &args.output {
+        Some(path) if path.as_os_str() != "-" => {
+            Some(BufWriter::new(File::create(path).map_err(|error| {
+                Failure::Write(format!("{}: {error}", path.display()))
+            })?))
         }
+        _ => None,
+    };
+    let mut size = 0;
+    {
+        let out: &mut dyn Write = match &mut file {
+            Some(file) => file,
+            None => &mut *stdout,
+        };
+        if (args.include || args.head) && !quiet {
+            out.write_all(&head).map_err(write_failure)?;
+        }
+        while let Some(chunk) = response.chunk().await? {
+            size += chunk.len();
+            if !quiet {
+                out.write_all(&redactor.push(&chunk))
+                    .map_err(write_failure)?;
+            }
+        }
+        if !quiet {
+            out.write_all(&redactor.finish()).map_err(write_failure)?;
+        }
+        out.flush().map_err(write_failure)?;
     }
-    out.flush().map_err(write_failure)?;
-    drop(out);
     if let Some(template) = &args.write_out {
         let code = format!("{:03}", status.as_u16());
         let text = expand(
@@ -60,9 +76,8 @@ pub async fn write(
                 ("method", method.to_string()),
             ],
         );
-        let mut stdout = stdout().lock();
         stdout
-            .write_all(text.as_bytes())
+            .write_all(&redactor.redact(text.as_bytes()))
             .and_then(|_| stdout.flush())
             .map_err(write_failure)?;
     }
@@ -70,9 +85,16 @@ pub async fn write(
         eprintln!("apicli: HTTP {status}");
     }
     if failed && (args.fail || args.fail_with_body) {
-        Ok(ExitCode::from(22))
+        Ok(22)
     } else {
-        Ok(ExitCode::SUCCESS)
+        Ok(0)
+    }
+}
+
+pub fn print_head(response: &Response, redactor: &Redactor) {
+    let head = redactor.redact(head(response).as_bytes());
+    for line in String::from_utf8_lossy(&head).lines() {
+        eprintln!("< {line}");
     }
 }
 
@@ -91,17 +113,6 @@ fn head(response: &Response) -> String {
     }
     text.push_str("\r\n");
     text
-}
-
-fn output(args: &RequestArgs) -> Result<Box<dyn Write>, Failure> {
-    match &args.output {
-        Some(path) if path.as_os_str() != "-" => {
-            let file = File::create(path)
-                .map_err(|error| Failure::Write(format!("{}: {error}", path.display())))?;
-            Ok(Box::new(BufWriter::new(file)))
-        }
-        _ => Ok(Box::new(BufWriter::new(stdout().lock()))),
-    }
 }
 
 fn expand(template: &str, values: &[(&str, String)]) -> String {

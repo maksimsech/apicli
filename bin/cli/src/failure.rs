@@ -1,5 +1,6 @@
 use std::error::Error as StdError;
 
+use apicli_vault::VaultError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -8,6 +9,8 @@ pub enum Failure {
     Usage(String),
     #[error("{flag} is not supported: {reason}")]
     Refused { flag: String, reason: &'static str },
+    #[error("this command must be run by the user in a terminal")]
+    NeedsTerminal,
     #[error("unsupported scheme {0}://, use https://")]
     Scheme(String),
     #[error("{0}")]
@@ -24,15 +27,25 @@ pub enum Failure {
     Timeout,
     #[error("TLS failed: {0}")]
     Tls(String),
+    #[error("stopped after {0} redirects, raise --max-redirs to follow more")]
+    Redirects(u32),
     #[error("request failed: {0}")]
     Network(String),
+    #[error("{0}")]
+    Denied(String),
+    #[error("{0}")]
+    Unconfigured(String),
+    #[error("{0}")]
+    Integrity(String),
+    #[error("{0}")]
+    Keystore(String),
 }
 
 impl Failure {
     pub fn code(&self) -> u8 {
         match self {
             Self::Scheme(_) => 1,
-            Self::Usage(_) | Self::Refused { .. } => 2,
+            Self::Usage(_) | Self::Refused { .. } | Self::NeedsTerminal => 2,
             Self::Url(_) => 3,
             Self::Dns(_) => 6,
             Self::Connect(_) => 7,
@@ -40,7 +53,21 @@ impl Failure {
             Self::Read(_) => 26,
             Self::Timeout => 28,
             Self::Tls(_) => 35,
+            Self::Redirects(_) => 47,
             Self::Network(_) => 56,
+            Self::Denied(_) => 110,
+            Self::Unconfigured(_) => 112,
+            Self::Integrity(_) => 113,
+            Self::Keystore(_) => 114,
+        }
+    }
+}
+
+impl From<VaultError> for Failure {
+    fn from(error: VaultError) -> Self {
+        match error {
+            VaultError::NoHome | VaultError::Keystore(_) => Self::Keystore(error.to_string()),
+            VaultError::Corrupt(_) | VaultError::Io(_) => Self::Integrity(error.to_string()),
         }
     }
 }
