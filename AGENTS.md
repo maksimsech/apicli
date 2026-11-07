@@ -1,0 +1,19 @@
+## Project Context
+
+apicli is a curl-compatible Rust CLI for coding agents. It will add per-host API credentials the agent never sees, enforce method and path rules, and rate limit per host. The binary lives in `bin/cli`. `bin/cli/skill/SKILL.md` is compiled into it and must match its behavior.
+
+## Code
+
+Keep code simple and direct. Do not write comments.
+
+Never use `pub(crate)`. Manage visibility through module declarations and re-exports in `mod.rs`.
+
+Import types and functions with `use` and refer to their short names.
+
+## Test
+
+Write tests only for security-critical code: refused flags, the one-URL rule, URL normalization, host binding, redirects, redaction, method overrides, proxies and rate limits. Do not add other tests unless asked.
+
+## Docs
+
+Do not add documentation files to the repository.
