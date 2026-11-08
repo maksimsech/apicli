@@ -110,6 +110,19 @@ fn vault_with(origin: &str, host: HostPolicy) -> Vault {
     vault
 }
 
+fn allow(method: &str, path: &str) -> HostPolicy {
+    HostPolicy {
+        allow: vec![Rule {
+            method: method.into(),
+            path: path.into(),
+            max_body: None,
+            content_type: None,
+            allow_body: false,
+        }],
+        ..HostPolicy::default()
+    }
+}
+
 fn store(name: &str) -> Store {
     let dir = env::temp_dir().join(format!("apicli-bypass-{}-{name}", process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -197,24 +210,53 @@ async fn writes_reach_the_server_only_through_an_allow_rule() {
     assert_eq!(code(&denied), 110);
     assert_eq!(api.count(), 0);
 
-    let rule = Rule {
-        method: "POST".into(),
-        path: "/v1/orders/*/notes".into(),
-        max_body: None,
-        content_type: None,
-        allow_body: false,
-    };
-    let allowed = vault_with(
-        &api.origin,
-        HostPolicy {
-            allow: vec![rule],
-            ..HostPolicy::default()
-        },
-    );
+    let allowed = vault_with(&api.origin, allow("POST", "/v1/orders/*/notes"));
     let (result, _, _) = run(&args, &allowed, &store("write-allowed")).await;
 
     assert_eq!(code(&result), 0);
     assert_eq!(api.count(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn redirect_to_a_denied_path_is_not_followed() {
+    let api = Server::start(|request| {
+        if request.starts_with("POST /v1/orders/1/notes ") {
+            reply(
+                "307 Temporary Redirect",
+                "Location: /v1/orders/1/refund\r\n",
+                "",
+            )
+        } else {
+            ok(request)
+        }
+    });
+    let allowed = vault_with(&api.origin, allow("POST", "/v1/orders/*/notes"));
+    let url = format!("{}/v1/orders/1/notes", api.origin);
+
+    let (result, _, _) = run(
+        &["-L", "--json", "{}", &url],
+        &allowed,
+        &store("redirect-denied"),
+    )
+    .await;
+
+    assert_eq!(code(&result), 110);
+    assert_eq!(api.count(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn agent_cannot_set_the_credential_header() {
+    let api = Server::start(ok);
+
+    let (result, _, _) = run(
+        &["-H", "x-api-key: guessed", &api.origin],
+        &vault(&api.origin),
+        &store("credential-header"),
+    )
+    .await;
+
+    assert_eq!(code(&result), 2);
+    assert_eq!(api.count(), 0);
 }
 
 #[tokio::test(flavor = "current_thread")]

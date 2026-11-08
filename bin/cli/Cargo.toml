@@ -3,8 +3,10 @@ name = "apicli"
 version = "0.1.0"
 description = "curl for APIs that need credentials, built for coding agents"
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 publish = false
 
 [dependencies]

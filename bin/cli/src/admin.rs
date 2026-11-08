@@ -112,7 +112,6 @@ pub fn password(command: PasswordCommand) -> Result<u8, Failure> {
 }
 
 pub fn authenticate(store: &Store, vault: &mut Vault) -> Result<(), Failure> {
-    require_terminal()?;
     let Some(admin) = vault.admin.clone() else {
         eprintln!(
             "apicli: warning: no admin password is set, so anyone at this terminal can change apicli. Set one with: apicli password set"

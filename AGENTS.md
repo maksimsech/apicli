@@ -1,12 +1,12 @@
 ## Project Context
 
-apicli is a curl-compatible Rust CLI for coding agents. It will add per-host API credentials the agent never sees, enforce method and path rules, and rate limit per host. The binary lives in `bin/cli`. `bin/cli/skill/SKILL.md` is compiled into it and must match its behavior.
+apicli is a curl-compatible Rust CLI for coding agents. It adds per-host API credentials the agent never sees, enforces method and path rules, and rate limits per host. The binary lives in `bin/cli`. `bin/cli/skill/SKILL.md` is compiled into it and must match its behavior.
 
 ## Code
 
 Keep code simple and direct. Do not write comments.
 
-Never use `pub(crate)`. Manage visibility through module declarations and re-exports in `mod.rs`.
+Never use `pub(crate)`. Manage visibility through module declarations and `pub use` re-exports in the parent module.
 
 Import types and functions with `use` and refer to their short names.
 

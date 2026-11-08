@@ -190,21 +190,29 @@ pub enum PasswordCommand {
 pub enum SkillCommand {
     #[command(about = "Print SKILL.md to stdout")]
     Print,
-    #[command(about = "Install SKILL.md for the agent tools on this machine")]
+    #[command(about = "Install SKILL.md for one agent or into a skills directory")]
     Install {
-        #[arg(long, value_enum, help = "Install for one tool only")]
-        target: Option<Target>,
-        #[arg(long, value_name = "DIR", help = "Install into this skills directory")]
+        #[arg(
+            long,
+            value_enum,
+            help = "Install into this agent's skills directory in your home directory"
+        )]
+        agent: Option<Agent>,
+        #[arg(
+            long,
+            value_name = "DIR",
+            conflicts_with = "agent",
+            help = "Install into this skills directory, like ~/.claude/skills or .claude/skills"
+        )]
         path: Option<PathBuf>,
     },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum Target {
+pub enum Agent {
     Claude,
-    Opencode,
     Codex,
-    Agents,
+    Opencode,
 }
 
 #[derive(Debug, Args)]

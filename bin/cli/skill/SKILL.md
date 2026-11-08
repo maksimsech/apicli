@@ -45,8 +45,9 @@ Refused flags, such as -k, -x, --resolve, -u and -b, print the reason. Drop the 
 - 112, host not configured: show the user the `apicli secret add ...` line from stderr and wait. Use plain curl only if the API needs no credentials.
 - 113 or 114: apicli's setup is broken or the keychain is unavailable. Tell the user. Don't touch apicli's files.
 - 2: unsupported flag or bad arguments. stderr names the problem.
-- 3: bad URL. Include the scheme, like https://.
-- 6, 7, 28, 35: DNS failure, connection failure, timeout, TLS error.
+- 1 or 3: unsupported scheme or bad URL. Use https://.
+- 6, 7, 28, 35, 56: DNS failure, connection failure, timeout, TLS error, connection dropped.
+- 23 or 26: apicli couldn't write the output or read a file you passed with @.
 - 22: HTTP 4xx or 5xx with -f or --fail-with-body.
 - 47: too many redirects.
 - 0 with `apicli: HTTP <status>` on stderr: the API answered with an error. stdout has its error body.

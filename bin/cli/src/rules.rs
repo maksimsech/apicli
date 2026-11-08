@@ -49,7 +49,7 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
         AllowCommand::Rm { host, method, path } => {
             let origin = Origin::parse(&host).map_err(Failure::Usage)?;
             remove(
-                &mut policy.hosts.entry(origin.clone()).or_default().allow,
+                policy.hosts.get_mut(&origin).map(|host| &mut host.allow),
                 &method,
                 &path,
             )?;
@@ -85,7 +85,7 @@ pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
         DenyCommand::Rm { host, method, path } => {
             let origin = Origin::parse(&host).map_err(Failure::Usage)?;
             remove(
-                &mut policy.hosts.entry(origin.clone()).or_default().deny,
+                policy.hosts.get_mut(&origin).map(|host| &mut host.deny),
                 &method,
                 &path,
             )?;
@@ -118,7 +118,15 @@ pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
         }
         LimitCommand::Rm { host } => {
             let origin = Origin::parse(&host).map_err(Failure::Usage)?;
-            let host = policy.hosts.entry(origin.clone()).or_default();
+            let host = policy
+                .hosts
+                .get_mut(&origin)
+                .filter(|host| host.rate.is_some() || host.burst.is_some() || host.daily.is_some())
+                .ok_or_else(|| {
+                    Failure::Usage(format!(
+                        "{origin} has no limits, run apicli hosts to list them"
+                    ))
+                })?;
             host.rate = None;
             host.burst = None;
             host.daily = None;
@@ -174,16 +182,16 @@ fn same(rule: &Rule, method: &str, path: &str) -> bool {
     rule.method.eq_ignore_ascii_case(method) && rule.path == path
 }
 
-fn remove(rules: &mut Vec<Rule>, method: &str, path: &str) -> Result<(), Failure> {
-    let count = rules.len();
+fn remove(rules: Option<&mut Vec<Rule>>, method: &str, path: &str) -> Result<(), Failure> {
+    let rules = rules
+        .filter(|rules| rules.iter().any(|rule| same(rule, method, path)))
+        .ok_or_else(|| {
+            Failure::Usage(format!(
+                "no rule for {method} {path}, run apicli hosts to list them"
+            ))
+        })?;
     rules.retain(|rule| !same(rule, method, path));
-    if rules.len() == count {
-        Err(Failure::Usage(format!(
-            "no rule for {method} {path}, run apicli hosts to list them"
-        )))
-    } else {
-        Ok(())
-    }
+    Ok(())
 }
 
 fn effective(vault: &Vault) -> Policy {

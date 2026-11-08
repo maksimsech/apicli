@@ -22,8 +22,8 @@ codesign --force --options runtime --identifier dev.apicli --sign "apicli local"
 
 ```sh
 apicli secret add github --host api.github.com --header 'Authorization: Bearer {secret}'
-apicli password set      # optional: protects rule changes
-apicli skill install     # teaches Claude Code, opencode and Codex to use apicli
+apicli password set                  # protects secrets, rules and limits from the agent
+apicli skill install --agent claude  # or codex, opencode, or --path DIR
 ```
 
 You type the secret at a prompt. It never goes on the command line.
@@ -48,6 +48,6 @@ apicli log
 ## What it protects
 
 - Each key is sent only to the host it was added for, redirects included. It's masked in `-v` output and in responses that echo it back.
-- Changing secrets, rules or limits needs you at a terminal, plus the admin password if you set one. An agent can't do it.
+- Changing secrets, rules or limits needs a terminal and the admin password. Set one: without it, an agent can open a terminal of its own (with `script`, for example) and change them.
 - Keys live in an encrypted vault. On macOS its master key is in the Keychain. On Linux and Windows it's a file in apicli's data folder, so a determined agent could read it.
 - If macOS asks whether anything other than apicli may read `dev.apicli`, click Deny.

@@ -1,8 +1,10 @@
 [package]
 name = "apicli-core"
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 base64.workspace = true

@@ -1,8 +1,10 @@
 [package]
 name = "apicli-vault"
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 apicli-core.workspace = true

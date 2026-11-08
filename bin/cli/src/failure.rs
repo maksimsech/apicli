@@ -96,9 +96,14 @@ impl From<reqwest::Error> for Failure {
         } else if error.is_connect() && text.contains("dns error") {
             Self::Dns(cause)
         } else if error.is_connect()
-            && ["certificate", "alert", "peer"]
-                .iter()
-                .any(|word| text.contains(word))
+            && [
+                "certificate",
+                "alert",
+                "peer is incompatible",
+                "peer misbehaved",
+            ]
+            .iter()
+            .any(|word| text.contains(word))
         {
             Self::Tls(cause)
         } else if error.is_connect() {

@@ -126,7 +126,7 @@ pub async fn perform(
         }
         let response = request.send().await?;
         if response.status() == StatusCode::TOO_MANY_REQUESTS {
-            let until = now() + retry_after(&response);
+            let until = now().saturating_add(retry_after(&response));
             store.update_buckets(|buckets| {
                 buckets
                     .entry(credential.origin.to_string())
@@ -162,7 +162,7 @@ pub async fn perform(
 }
 
 fn take(store: &Store, origin: &Origin, limits: &Limits, wait: Option<f64>) -> Result<(), Failure> {
-    let deadline = wait.map(|seconds| now() + (seconds.max(0.0) * 1000.0) as u64);
+    let deadline = wait.map(|seconds| now().saturating_add((seconds.max(0.0) * 1000.0) as u64));
     loop {
         let current = now();
         let result = store.update_buckets(|buckets| {
@@ -174,7 +174,7 @@ fn take(store: &Store, origin: &Origin, limits: &Limits, wait: Option<f64>) -> R
         let Err(wait) = result else {
             return Ok(());
         };
-        if deadline.is_some_and(|deadline| current + wait.millis() <= deadline) {
+        if deadline.is_some_and(|deadline| current.saturating_add(wait.millis()) <= deadline) {
             sleep(Duration::from_millis(wait.millis()));
             continue;
         }
