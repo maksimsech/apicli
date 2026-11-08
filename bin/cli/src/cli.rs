@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{
     Arg, ArgAction, Args, ColorChoice, CommandFactory, Error, FromArgMatches, Parser, Subcommand,
-    error::ErrorKind, parser::ValueSource,
+    ValueEnum, error::ErrorKind, parser::ValueSource,
 };
 
 use crate::failure::Failure;
@@ -32,10 +32,37 @@ pub enum Command {
         #[arg(long, help = "Print JSON")]
         json: bool,
     },
+    #[command(about = "Check whether a request would be allowed, without sending it")]
+    Explain {
+        method: String,
+        url: String,
+        #[arg(long, help = "Print JSON")]
+        json: bool,
+    },
     #[command(about = "Manage stored secrets (run by the user in a terminal)")]
     Secret {
         #[command(subcommand)]
         command: SecretCommand,
+    },
+    #[command(about = "Allow a method on a path (run by the user in a terminal)")]
+    Allow {
+        #[command(subcommand)]
+        command: AllowCommand,
+    },
+    #[command(about = "Deny a method on a path (run by the user in a terminal)")]
+    Deny {
+        #[command(subcommand)]
+        command: DenyCommand,
+    },
+    #[command(about = "Show, edit or verify policy.toml")]
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommand,
+    },
+    #[command(about = "Set or remove the admin password (run by the user in a terminal)")]
+    Password {
+        #[command(subcommand)]
+        command: PasswordCommand,
     },
     #[command(about = "The agent skill for apicli")]
     Skill {
@@ -61,9 +88,80 @@ pub enum SecretCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum AllowCommand {
+    #[command(about = "Allow METHOD on paths matching PATH, like '/v1/orders/*/notes'")]
+    Add {
+        host: String,
+        method: String,
+        path: String,
+        #[arg(long, value_name = "BYTES", help = "Largest body allowed")]
+        max_body: Option<usize>,
+        #[arg(long, value_name = "TYPE", help = "Required Content-Type")]
+        content_type: Option<String>,
+        #[arg(long, help = "Allow a body on GET, HEAD or OPTIONS")]
+        allow_body: bool,
+    },
+    #[command(about = "Remove an allow rule")]
+    Rm {
+        host: String,
+        method: String,
+        path: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DenyCommand {
+    #[command(about = "Deny METHOD on paths matching PATH, like '/v1/exports/**'")]
+    Add {
+        host: String,
+        method: String,
+        path: String,
+    },
+    #[command(about = "Remove a deny rule")]
+    Rm {
+        host: String,
+        method: String,
+        path: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PolicyCommand {
+    #[command(about = "Print policy.toml")]
+    Show,
+    #[command(about = "Edit policy.toml in $EDITOR and accept the result")]
+    Edit,
+    #[command(about = "Check that policy.toml is intact")]
+    Verify,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PasswordCommand {
+    #[command(about = "Set or change the admin password")]
+    Set,
+    #[command(about = "Remove the admin password")]
+    Remove,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum SkillCommand {
     #[command(about = "Print SKILL.md to stdout")]
     Print,
+    #[command(about = "Install SKILL.md for the agent tools on this machine")]
+    Install {
+        #[arg(long, value_enum, help = "Install for one tool only")]
+        target: Option<Target>,
+        #[arg(long, value_name = "DIR", help = "Install into this skills directory")]
+        path: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum Target {
+    Claude,
+    Opencode,
+    Codex,
+    Agents,
 }
 
 #[derive(Debug, Args)]

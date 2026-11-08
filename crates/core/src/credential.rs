@@ -26,9 +26,19 @@ fn expose<S: Serializer>(secret: &SecretString, serializer: S) -> Result<S::Ok, 
     serializer.serialize_str(secret.expose_secret())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Admin {
+    pub hash: String,
+    pub failures: u32,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Vault {
     pub credentials: Vec<Credential>,
+    #[serde(default)]
+    pub admin: Option<Admin>,
+    #[serde(default)]
+    pub policy_hash: Option<String>,
 }
 
 impl Vault {

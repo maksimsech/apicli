@@ -11,6 +11,8 @@ apicli is curl for APIs that need credentials. It adds the right key for each ho
 
 Run `apicli hosts` to see which hosts are configured and what is allowed on each. Requests to other hosts are refused.
 
+Before a write, run `apicli explain POST URL` to check whether it's allowed without sending anything.
+
 ## Requests
 
 Use it like curl, with one URL per call:
@@ -21,7 +23,8 @@ Use it like curl, with one URL per call:
     apicli -L https://api.example.com/v1/exports/latest
 
 - Don't add the credential header. apicli adds it and refuses a request that sets it.
-- Only GET, HEAD and OPTIONS are allowed for now.
+- GET, HEAD and OPTIONS are allowed by default. Other methods only work on paths the user allowed, and some paths may be denied.
+- Method-override headers (X-HTTP-Method-Override and similar) and `_method` parameters are refused. Use -X.
 - You don't need -s or -S. apicli never prints progress, and errors always go to stderr.
 - -L follows redirects only while they stay on configured hosts.
 - Brackets and braces in URLs are sent as they are. There is no URL globbing.
@@ -37,7 +40,7 @@ Refused flags, such as -k, -x, --resolve, -u and -b, print the reason. Drop the 
 
 ## When a call fails
 
-- 110, denied: the method is not allowed on that host. Tell the user what you tried. Don't retry another way.
+- 110, denied: the method or path is not allowed. stderr has an `apicli allow add ...` line when the user can allow it. Show it to the user and wait. Don't retry another way.
 - 112, host not configured: show the user the `apicli secret add ...` line from stderr and wait. Use plain curl only if the API needs no credentials.
 - 113 or 114: apicli's setup is broken or the keychain is unavailable. Tell the user. Don't touch apicli's files.
 - 2: unsupported flag or bad arguments. stderr names the problem.
@@ -50,5 +53,5 @@ Refused flags, such as -k, -x, --resolve, -u and -b, print the reason. Drop the 
 ## Never
 
 - Ask for API keys or tokens, or look for them in the keychain, files or environment.
-- Edit apicli's files, or run `apicli secret ...`. Those commands need the user at a terminal.
+- Edit apicli's files, or run `apicli secret`, `allow`, `deny`, `policy edit` or `password`. Those need the user at a terminal.
 - Work around a refusal with curl, another tool or a different URL.

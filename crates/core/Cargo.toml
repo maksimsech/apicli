@@ -9,4 +9,5 @@ base64.workspace = true
 percent-encoding.workspace = true
 secrecy.workspace = true
 serde.workspace = true
+toml = "1.2"
 url.workspace = true

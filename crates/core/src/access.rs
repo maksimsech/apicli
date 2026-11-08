@@ -1,6 +1,6 @@
 use url::Url;
 
-use crate::{Credential, Origin};
+use crate::{Body, Credential, Grant, Origin, Policy, Rule, Vault};
 
 pub const READ_METHODS: [&str; 3] = ["GET", "HEAD", "OPTIONS"];
 
@@ -8,15 +8,20 @@ pub const READ_METHODS: [&str; 3] = ["GET", "HEAD", "OPTIONS"];
 pub enum Denial {
     Userinfo,
     EncodedSeparator,
+    MethodOverride(String),
     Unconfigured(String),
-    Method { method: String, origin: Origin },
+    Rule(Rule),
+    NotAllowed,
+    Body(String),
 }
 
 pub fn authorize<'a>(
     url: &Url,
     method: &str,
-    credentials: &'a [Credential],
-) -> Result<&'a Credential, Denial> {
+    body: Option<Body>,
+    vault: &'a Vault,
+    policy: &Policy,
+) -> Result<(&'a Credential, Grant), Denial> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err(Denial::Userinfo);
     }
@@ -24,18 +29,20 @@ pub fn authorize<'a>(
     if path.contains("%2f") || path.contains("%5c") {
         return Err(Denial::EncodedSeparator);
     }
+    if url
+        .query_pairs()
+        .any(|(name, _)| name.eq_ignore_ascii_case("_method"))
+    {
+        return Err(Denial::MethodOverride("_method".into()));
+    }
     let origin = Origin::of(url).ok_or_else(|| Denial::Unconfigured(url.to_string()))?;
-    let credential = credentials
+    let credential = vault
+        .credentials
         .iter()
         .find(|credential| credential.origin == origin)
         .ok_or_else(|| Denial::Unconfigured(origin.to_string()))?;
-    if !READ_METHODS.contains(&method) {
-        return Err(Denial::Method {
-            method: method.into(),
-            origin,
-        });
-    }
-    Ok(credential)
+    let grant = policy.host(&origin).check(method, url.path(), body)?;
+    Ok((credential, grant))
 }
 
 #[cfg(test)]
@@ -44,20 +51,29 @@ mod tests {
 
     use super::*;
 
-    fn credentials() -> Vec<Credential> {
-        vec![Credential {
-            name: "example".into(),
-            origin: Origin::parse("api.example.com").unwrap(),
-            header: "X-API-Key".into(),
-            template: "{secret}".into(),
-            secret: SecretString::from("key-1234567890"),
-        }]
+    fn vault() -> Vault {
+        Vault {
+            credentials: vec![Credential {
+                name: "example".into(),
+                origin: Origin::parse("api.example.com").unwrap(),
+                header: "X-API-Key".into(),
+                template: "{secret}".into(),
+                secret: SecretString::from("key-1234567890"),
+            }],
+            ..Vault::default()
+        }
     }
 
     fn check(url: &str, method: &str) -> Result<String, Denial> {
-        let credentials = credentials();
-        authorize(&Url::parse(url).unwrap(), method, &credentials)
-            .map(|credential| credential.name.clone())
+        let vault = vault();
+        authorize(
+            &Url::parse(url).unwrap(),
+            method,
+            None,
+            &vault,
+            &Policy::default(),
+        )
+        .map(|(credential, _)| credential.name.clone())
     }
 
     #[test]
@@ -82,26 +98,28 @@ mod tests {
 
     #[test]
     fn redirect_to_another_origin_is_unconfigured() {
-        let current = Url::parse("https://api.example.com/v1/download").unwrap();
-        let next = current.join("//attacker.example/collect").unwrap();
-        let credentials = credentials();
+        let next = Url::parse("https://api.example.com/v1/download")
+            .unwrap()
+            .join("//attacker.example/collect")
+            .unwrap();
+        let vault = vault();
 
         assert!(matches!(
-            authorize(&next, "GET", &credentials),
+            authorize(&next, "GET", None, &vault, &Policy::default()),
             Err(Denial::Unconfigured(_))
         ));
     }
 
     #[test]
-    fn writes_are_denied() {
-        assert!(matches!(
+    fn writes_are_denied_by_default() {
+        assert_eq!(
             check("https://api.example.com/v1/users", "POST"),
-            Err(Denial::Method { .. })
-        ));
-        assert!(matches!(
+            Err(Denial::NotAllowed)
+        );
+        assert_eq!(
             check("https://api.example.com/v1/users", "DELETE"),
-            Err(Denial::Method { .. })
-        ));
+            Err(Denial::NotAllowed)
+        );
     }
 
     #[test]
@@ -121,6 +139,14 @@ mod tests {
         assert_eq!(
             check("https://api.example.com/v1/a%5cb", "GET"),
             Err(Denial::EncodedSeparator)
+        );
+    }
+
+    #[test]
+    fn method_parameter_is_rejected() {
+        assert_eq!(
+            check("https://api.example.com/v1/users/1?_method=DELETE", "GET"),
+            Err(Denial::MethodOverride("_method".into()))
         );
     }
 

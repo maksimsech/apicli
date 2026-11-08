@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 apicli-core.workspace = true
+argon2 = "0.6"
 aws-lc-rs = "1.19"
 directories = "6.0"
 secrecy.workspace = true

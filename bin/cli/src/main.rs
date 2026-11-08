@@ -1,15 +1,16 @@
 mod admin;
 mod cli;
 mod failure;
+mod info;
 mod request;
 mod response;
+mod rules;
+mod skill;
 
 use std::{env, process::ExitCode};
 
-use cli::{Command, SkillCommand, parse};
+use cli::{Command, parse};
 use failure::Failure;
-
-const SKILL: &str = include_str!("../skill/SKILL.md");
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
@@ -17,7 +18,9 @@ async fn main() -> ExitCode {
     match run().await {
         Ok(code) => ExitCode::from(code),
         Err(failure) => {
-            eprintln!("apicli: {failure}");
+            for line in failure.to_string().lines() {
+                eprintln!("apicli: {line}");
+            }
             ExitCode::from(failure.code())
         }
     }
@@ -30,14 +33,14 @@ async fn run() -> Result<u8, Failure> {
     }
     let cli = parse(args)?;
     match cli.command {
-        Some(Command::Hosts { json }) => admin::hosts(json),
+        Some(Command::Hosts { json }) => info::hosts(json),
+        Some(Command::Explain { method, url, json }) => info::explain(&method, &url, json),
         Some(Command::Secret { command }) => admin::secret(command),
-        Some(Command::Skill {
-            command: SkillCommand::Print,
-        }) => {
-            print!("{SKILL}");
-            Ok(0)
-        }
+        Some(Command::Password { command }) => admin::password(command),
+        Some(Command::Allow { command }) => rules::allow(command),
+        Some(Command::Deny { command }) => rules::deny(command),
+        Some(Command::Policy { command }) => rules::policy(command),
+        Some(Command::Skill { command }) => skill::skill(command),
         None => request::send(cli.request).await,
     }
 }

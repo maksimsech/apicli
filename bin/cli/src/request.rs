@@ -5,7 +5,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use apicli_core::{Credential, Denial, READ_METHODS, Redactor, UNRESERVED, Vault, authorize};
+use apicli_core::{
+    Body, Credential, Denial, METHOD_OVERRIDES, Origin, Policy, Redactor, UNRESERVED, Vault,
+    authorize,
+};
 use apicli_vault::Store;
 use percent_encoding::percent_encode;
 use reqwest::{
@@ -13,21 +16,24 @@ use reqwest::{
     header::{
         ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, LOCATION, REFERER, USER_AGENT,
     },
-    redirect::Policy,
+    redirect::Policy as Redirect,
 };
 use secrecy::ExposeSecret;
 use url::{ParseError, Url};
 
-use crate::{admin::add_hint, cli::RequestArgs, failure::Failure, response};
+use crate::{admin::add_hint, cli::RequestArgs, failure::Failure, response, rules::load_policy};
 
 pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
-    let vault = Store::open()?.load()?;
-    perform(&args, &vault, &mut stdout().lock()).await
+    let store = Store::open()?;
+    let vault = store.load()?;
+    let policy = load_policy(&store, &vault)?;
+    perform(&args, &vault, &policy, &mut stdout().lock()).await
 }
 
 pub async fn perform(
     args: &RequestArgs,
     vault: &Vault,
+    policy: &Policy,
     stdout: &mut dyn Write,
 ) -> Result<u8, Failure> {
     let mut url = parse_url(args.url.as_deref().unwrap_or_default())?;
@@ -64,13 +70,20 @@ pub async fn perform(
         }
     };
     apply_custom_headers(&mut headers, &args.headers)?;
+    check_overrides(&headers)?;
     let client = client(args)?;
     let redactor = Redactor::new(vault.secrets());
     let started = Instant::now();
     let mut redirects = 0;
     loop {
-        let credential = authorize(&url, method.as_str(), &vault.credentials)
-            .map_err(|denial| denied(denial, vault))?;
+        let view = body.as_ref().map(|bytes| Body {
+            len: bytes.len(),
+            content_type: headers
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+        });
+        let (credential, _) = authorize(&url, method.as_str(), view, vault, policy)
+            .map_err(|denial| denied(denial, &url, method.as_str(), vault, policy))?;
         let request_headers = with_credential(&headers, credential)?;
         if args.verbose {
             for line in request_lines(&method, &url, &request_headers) {
@@ -121,16 +134,31 @@ fn redirect_target(response: &Response) -> Option<Url> {
     response.url().join(location).ok()
 }
 
-fn denied(denial: Denial, vault: &Vault) -> Failure {
+pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault, policy: &Policy) -> Failure {
+    let origin = Origin::of(url).map_or_else(|| url.to_string(), |origin| origin.to_string());
+    let path = url.path();
     match denial {
         Denial::Userinfo => Failure::Url("credentials in the URL are not allowed".into()),
         Denial::EncodedSeparator => {
             Failure::Url("an encoded / or \\ in the URL path is not allowed".into())
         }
-        Denial::Method { method, origin } => Failure::Denied(format!(
-            "denied: {method} is not allowed on {origin}. Allowed: {}",
-            READ_METHODS.join(", ")
+        Denial::MethodOverride(name) => Failure::Denied(format!(
+            "denied: {name} is not allowed because apicli checks the real method. Use -X instead"
         )),
+        Denial::Rule(rule) => Failure::Denied(format!(
+            "denied: {method} {path} on {origin} matches deny {rule}"
+        )),
+        Denial::Body(reason) => {
+            Failure::Denied(format!("denied: {method} {path} on {origin}: {reason}"))
+        }
+        Denial::NotAllowed => {
+            let allowed = Origin::of(url)
+                .map(|origin| policy.host(&origin).summary())
+                .unwrap_or_default();
+            Failure::Denied(format!(
+                "denied: {method} {path} on {origin}\nallowed here: {allowed}\nto allow it, the user can run: apicli allow add {origin} {method} '{path}'"
+            ))
+        }
         Denial::Unconfigured(origin) => {
             let configured = vault
                 .credentials
@@ -138,15 +166,27 @@ fn denied(denial: Denial, vault: &Vault) -> Failure {
                 .map(|credential| credential.origin.to_string())
                 .collect::<Vec<_>>();
             let known = if configured.is_empty() {
-                "No hosts are configured yet.".to_string()
+                "no hosts are configured yet".to_string()
             } else {
-                format!("Configured: {}.", configured.join(", "))
+                format!("configured: {}", configured.join(", "))
             };
             Failure::Unconfigured(format!(
-                "{origin} is not configured. {known} The user can add it with: {}",
+                "{origin} is not configured\n{known}\nto add it, the user can run: {}",
                 add_hint(&origin)
             ))
         }
+    }
+}
+
+fn check_overrides(headers: &HeaderMap) -> Result<(), Failure> {
+    match METHOD_OVERRIDES
+        .iter()
+        .find(|name| headers.contains_key(**name))
+    {
+        Some(name) => Err(Failure::Denied(format!(
+            "denied: {name} is not allowed because apicli checks the real method. Use -X instead"
+        ))),
+        None => Ok(()),
     }
 }
 
@@ -183,7 +223,7 @@ fn request_lines(method: &Method, url: &Url, headers: &HeaderMap) -> Vec<String>
     lines
 }
 
-fn parse_url(raw: &str) -> Result<Url, Failure> {
+pub fn parse_url(raw: &str) -> Result<Url, Failure> {
     let url = Url::parse(raw).map_err(|error| match error {
         ParseError::RelativeUrlWithoutBase => {
             Failure::Url(format!("{raw} has no scheme, use https://{raw}"))
@@ -317,7 +357,7 @@ fn header_value(value: &str) -> Result<HeaderValue, Failure> {
 }
 
 fn client(args: &RequestArgs) -> Result<Client, Failure> {
-    let mut builder = Client::builder().no_proxy().redirect(Policy::none());
+    let mut builder = Client::builder().no_proxy().redirect(Redirect::none());
     if !args.compressed {
         builder = builder.no_gzip().no_brotli().no_zstd().no_deflate();
     }
@@ -354,5 +394,22 @@ mod tests {
 
         assert!(lines.contains(&"> authorization: [redacted]".to_string()));
         assert!(!lines.concat().contains("sk_live_1234567890"));
+    }
+
+    #[test]
+    fn method_override_headers_are_denied() {
+        for name in [
+            "X-HTTP-Method-Override",
+            "x-http-method",
+            "X-Method-Override",
+        ] {
+            let mut headers = HeaderMap::new();
+            apply_custom_headers(&mut headers, &[format!("{name}: DELETE")]).unwrap();
+
+            assert!(
+                matches!(check_overrides(&headers), Err(Failure::Denied(_))),
+                "{name}"
+            );
+        }
     }
 }
