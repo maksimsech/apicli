@@ -1,4 +1,3 @@
-mod keystore;
 mod password;
 mod sealed;
 mod store;

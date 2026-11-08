@@ -9,7 +9,7 @@ pub fn hash_password(password: &str) -> Result<String, VaultError> {
     Argon2::default()
         .hash_password(password.as_bytes())
         .map(|hash| hash.to_string())
-        .map_err(|error| VaultError::Keystore(error.to_string()))
+        .map_err(|error| VaultError::Crypto(error.to_string()))
 }
 
 pub fn verify_password(password: &str, hash: &str) -> bool {

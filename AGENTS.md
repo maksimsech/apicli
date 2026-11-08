@@ -14,7 +14,7 @@ Import types and functions with `use` and refer to their short names.
 
 Write tests only for security-critical code: refused flags, the one-URL rule, URL normalization, host binding, redirects, redaction, method overrides, proxies and rate limits. Do not add other tests unless asked.
 
-The bypass suite is `bin/cli/src/bypass.rs`. It runs the request pipeline against local servers with test vaults and `Store::at` temp directories. Tests must never touch the real Keychain or apicli's data directory.
+The bypass suite is `bin/cli/src/bypass.rs`. It runs the request pipeline against local servers with test vaults and `Store::at` temp directories. Tests must never touch apicli's data directory.
 
 ## Docs
 

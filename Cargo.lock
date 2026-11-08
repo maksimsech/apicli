@@ -124,7 +124,6 @@ dependencies = [
  "aws-lc-rs",
  "directories",
  "secrecy",
- "security-framework",
  "serde_json",
  "thiserror",
  "zeroize",

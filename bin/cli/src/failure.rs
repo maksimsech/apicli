@@ -40,7 +40,7 @@ pub enum Failure {
     #[error("{0}")]
     Integrity(String),
     #[error("{0}")]
-    Keystore(String),
+    Setup(String),
 }
 
 impl Failure {
@@ -61,7 +61,7 @@ impl Failure {
             Self::Limited(_) => 111,
             Self::Unconfigured(_) => 112,
             Self::Integrity(_) => 113,
-            Self::Keystore(_) => 114,
+            Self::Setup(_) => 114,
         }
     }
 
@@ -80,7 +80,7 @@ impl Failure {
 impl From<VaultError> for Failure {
     fn from(error: VaultError) -> Self {
         match error {
-            VaultError::NoHome | VaultError::Keystore(_) => Self::Keystore(error.to_string()),
+            VaultError::NoHome | VaultError::Crypto(_) => Self::Setup(error.to_string()),
             VaultError::Corrupt(_) | VaultError::Io(_) => Self::Integrity(error.to_string()),
         }
     }

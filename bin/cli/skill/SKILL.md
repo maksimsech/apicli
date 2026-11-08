@@ -43,7 +43,7 @@ Refused flags, such as -k, -x, --resolve, -u and -b, print the reason. Drop the 
 - 110, denied: the method or path is not allowed. stderr has an `apicli allow add ...` line when the user can allow it. Show it to the user and wait. Don't retry another way.
 - 111, rate limited: stderr says how long to wait. Wait, or rerun with `--wait` (up to 30s) or `--wait=SECONDS`. Don't loop on retries.
 - 112, host not configured: show the user the `apicli secret add ...` line from stderr and wait. Use plain curl only if the API needs no credentials.
-- 113 or 114: apicli's setup is broken or the keychain is unavailable. Tell the user. Don't touch apicli's files.
+- 113 or 114: apicli's setup is broken. Tell the user. Don't touch apicli's files.
 - 2: unsupported flag or bad arguments. stderr names the problem.
 - 1 or 3: unsupported scheme or bad URL. Use https://.
 - 6, 7, 28, 35, 56: DNS failure, connection failure, timeout, TLS error, connection dropped.

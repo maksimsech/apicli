@@ -13,14 +13,14 @@ use directories::ProjectDirs;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-use crate::{keystore, sealed};
+use crate::sealed;
 
 #[derive(Debug, Error)]
 pub enum VaultError {
     #[error("no home directory to keep apicli's files in")]
     NoHome,
-    #[error("the keystore failed: {0}")]
-    Keystore(String),
+    #[error("{0}")]
+    Crypto(String),
     #[error("{0} can't be decrypted. Remove it to start over, which deletes every stored secret")]
     Corrupt(PathBuf),
     #[error("{0}")]
@@ -33,7 +33,7 @@ pub struct Store {
 
 impl Store {
     pub fn open() -> Result<Store, VaultError> {
-        let dirs = ProjectDirs::from("dev", "", "apicli").ok_or(VaultError::NoHome)?;
+        let dirs = ProjectDirs::from("dev", "mngapp", "apicli").ok_or(VaultError::NoHome)?;
         Ok(Store {
             dir: dirs.data_local_dir().to_path_buf(),
         })
@@ -105,19 +105,19 @@ impl Store {
             return Ok(Vault::default());
         }
         let corrupt = || VaultError::Corrupt(path.clone());
-        let key = keystore::read(&self.dir)?.ok_or_else(corrupt)?;
+        let key = self.read_key()?.ok_or_else(corrupt)?;
         let plain = sealed::open(&key, &fs::read(&path)?).ok_or_else(corrupt)?;
         serde_json::from_slice(&plain).map_err(|_| corrupt())
     }
 
     pub fn save(&self, vault: &Vault) -> Result<(), VaultError> {
         self.create_dir()?;
-        let key = match keystore::read(&self.dir)? {
+        let key = match self.read_key()? {
             Some(key) => key,
             None => {
                 let key = sealed::random_key()
-                    .ok_or_else(|| VaultError::Keystore("no system randomness".into()))?;
-                keystore::write(&self.dir, &key)?;
+                    .ok_or_else(|| VaultError::Crypto("no system randomness".into()))?;
+                write_private(&self.key_path(), &key)?;
                 key
             }
         };
@@ -126,6 +126,18 @@ impl Store {
             sealed::seal(&key, &plain).ok_or_else(|| VaultError::Corrupt(self.vault_path()))?;
         write_private(&self.vault_path(), &sealed)?;
         Ok(())
+    }
+
+    fn read_key(&self) -> Result<Option<Zeroizing<Vec<u8>>>, VaultError> {
+        match fs::read(self.key_path()) {
+            Ok(key) => Ok(Some(Zeroizing::new(key))),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn key_path(&self) -> PathBuf {
+        self.dir.join("master.key")
     }
 
     fn vault_path(&self) -> PathBuf {
@@ -145,7 +157,7 @@ impl Store {
     }
 }
 
-pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temp = path.with_extension("tmp");
     private_options()
         .truncate(true)

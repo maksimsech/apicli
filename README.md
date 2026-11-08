@@ -12,12 +12,6 @@ Needs Rust 1.89 or newer. Run the same command again to upgrade.
 cargo install --locked --git https://github.com/maksimsech/apicli
 ```
 
-On macOS, sign the binary so the Keychain keeps trusting it after upgrades. Create a certificate once (Keychain Access → Certificate Assistant → Create a Certificate, name `apicli local`, type Code Signing), then run this after each install:
-
-```sh
-codesign --force --options runtime --identifier dev.apicli --sign "apicli local" ~/.cargo/bin/apicli
-```
-
 ## Set up
 
 ```sh
@@ -49,5 +43,4 @@ apicli log
 
 - Each key is sent only to the host it was added for, redirects included. It's masked in `-v` output and in responses that echo it back.
 - Changing secrets, rules or limits needs a terminal and the admin password. Set one: without it, an agent can open a terminal of its own (with `script`, for example) and change them.
-- Keys live in an encrypted vault. On macOS its master key is in the Keychain. On Linux and Windows it's a file in apicli's data folder, so a determined agent could read it.
-- If macOS asks whether anything other than apicli may read `dev.apicli`, click Deny.
+- Keys are stored encrypted, but the encryption key is a file in apicli's data folder, so an agent that goes looking for it can decrypt them.
