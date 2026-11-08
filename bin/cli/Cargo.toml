@@ -1,15 +1,11 @@
 [package]
-name = "cli"
+name = "apicli"
 version = "0.1.0"
 description = "curl for APIs that need credentials, built for coding agents"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 publish = false
-
-[[bin]]
-name = "apicli"
-path = "src/main.rs"
 
 [dependencies]
 apicli-core.workspace = true

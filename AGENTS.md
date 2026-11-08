@@ -18,4 +18,4 @@ The bypass suite is `bin/cli/src/bypass.rs`. It runs the request pipeline agains
 
 ## Docs
 
-Do not add documentation files to the repository.
+`README.md` is the only documentation file. Keep it short, and update it when commands change.

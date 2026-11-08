@@ -2,7 +2,7 @@ identity := env("APICLI_SIGN_IDENTITY", "apicli local")
 
 [positional-arguments]
 d *args:
-    cargo run --locked -p cli -- "$@"
+    cargo run --locked -p apicli -- "$@"
 
 [macos]
 install:

@@ -83,6 +83,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "apicli"
+version = "0.1.0"
+dependencies = [
+ "apicli-core",
+ "apicli-vault",
+ "chrono",
+ "clap",
+ "directories",
+ "libc",
+ "percent-encoding",
+ "reqwest",
+ "rpassword",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "apicli-core"
 version = "0.0.0"
 dependencies = [
@@ -329,27 +350,6 @@ name = "clap_lex"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
-
-[[package]]
-name = "cli"
-version = "0.1.0"
-dependencies = [
- "apicli-core",
- "apicli-vault",
- "chrono",
- "clap",
- "directories",
- "libc",
- "percent-encoding",
- "reqwest",
- "rpassword",
- "secrecy",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "url",
-]
 
 [[package]]
 name = "cmake"
