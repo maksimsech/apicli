@@ -130,7 +130,9 @@ pub enum AllowCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum DenyCommand {
-    #[command(about = "Deny METHOD on paths matching PATH, like '/v1/exports/**'")]
+    #[command(
+        about = "Deny METHOD on paths matching PATH, like '/v1/exports/**'. Denying GET also denies HEAD"
+    )]
     Add {
         host: String,
         method: String,

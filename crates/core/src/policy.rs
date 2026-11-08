@@ -121,11 +121,10 @@ impl Default for HostPolicy {
 
 impl HostPolicy {
     pub fn check(&self, method: &str, path: &str, body: Option<Body>) -> Result<Grant, Denial> {
-        if let Some(rule) = self
-            .deny
-            .iter()
-            .find(|rule| rule.method == method && matches(&rule.path, path, true))
-        {
+        if let Some(rule) = self.deny.iter().find(|rule| {
+            (rule.method == method || rule.method == "GET" && method == "HEAD")
+                && matches(&rule.path, path, true)
+        }) {
             return Err(Denial::Rule(rule.clone()));
         }
         let read = self.methods.iter().any(|allowed| allowed == method);
@@ -340,6 +339,17 @@ mod tests {
             policy.check("GET", "/V1/exports/all", None),
             Err(Denial::Rule(rule("GET", "/v1/exports/**")))
         );
+    }
+
+    #[test]
+    fn deny_get_also_denies_head() {
+        let policy = host(vec![], vec![rule("GET", "/v1/exports/**")]);
+
+        assert_eq!(
+            policy.check("HEAD", "/v1/exports/all", None),
+            Err(Denial::Rule(rule("GET", "/v1/exports/**")))
+        );
+        assert_eq!(policy.check("HEAD", "/v1/users", None), Ok(Grant::Default));
     }
 
     #[test]

@@ -119,13 +119,33 @@ fn head(response: &Response) -> String {
 }
 
 fn expand(template: &str, values: &[(&str, String)]) -> String {
-    let mut text = template
+    let template = template
         .replace("\\n", "\n")
         .replace("\\r", "\r")
         .replace("\\t", "\t");
-    for (name, value) in values {
-        text = text.replace(&format!("%{{{name}}}"), value);
+    let mut text = String::new();
+    let mut rest = template.as_str();
+    while let Some(start) = rest.find("%{") {
+        text.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let found = rest.find('}').and_then(|end| {
+            values
+                .iter()
+                .find(|(name, _)| *name == &rest[2..end])
+                .map(|(_, value)| (end, value))
+        });
+        match found {
+            Some((end, value)) => {
+                text.push_str(value);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                text.push_str("%{");
+                rest = &rest[2..];
+            }
+        }
     }
+    text.push_str(rest);
     text
 }
 

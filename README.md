@@ -16,7 +16,7 @@ cargo install --locked --git https://github.com/maksimsech/apicli
 
 ```sh
 apicli secret add github --host api.github.com --header 'Authorization: Bearer {secret}'
-apicli password set                  # protects secrets, rules and limits from the agent
+apicli password set                  # needed to change secrets, rules and limits
 apicli skill install --agent claude  # or codex, opencode, or --path DIR
 ```
 
@@ -42,5 +42,5 @@ apicli log
 ## What it protects
 
 - Each key is sent only to the host it was added for, redirects included. It's masked in `-v` output and in responses that echo it back.
-- Changing secrets, rules or limits needs a terminal and the admin password. Set one: without it, an agent can open a terminal of its own (with `script`, for example) and change them.
-- Keys are stored encrypted, but the encryption key is a file in apicli's data folder, so an agent that goes looking for it can decrypt them.
+- Changing secrets, rules or limits through apicli needs a terminal and the admin password. Set one: without it, an agent can open a terminal of its own (with `script`, for example) and change them.
+- Keys and rules are stored encrypted, but the encryption key is a file in apicli's data folder. An agent that goes looking for it can read the keys and rewrite the rules, so apicli protects against mistakes and prompt injection, not against a determined agent.

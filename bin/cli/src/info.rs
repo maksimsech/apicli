@@ -90,16 +90,15 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
 pub fn explain(method: &str, url: &str, json: bool) -> Result<u8, Failure> {
     let vault = Store::open()?.load()?;
     let url = parse_url(url)?;
-    let method = method.to_ascii_uppercase();
     let mut explanation = Explanation {
         allowed: false,
-        method: method.clone(),
+        method: method.to_string(),
         url: url.to_string(),
         credential: None,
         rule: None,
         reason: None,
     };
-    let code = match authorize(&url, &method, None, &vault) {
+    let code = match authorize(&url, method, None, &vault) {
         Ok((credential, grant)) => {
             explanation.allowed = true;
             explanation.credential = Some(format!("{} ({})", credential.name, credential.header));
@@ -113,7 +112,7 @@ pub fn explain(method: &str, url: &str, json: bool) -> Result<u8, Failure> {
             0
         }
         Err(denial) => {
-            let failure = denied(denial, &url, &method, &vault);
+            let failure = denied(denial, &url, method, &vault);
             explanation.reason = Some(failure.to_string());
             failure.code()
         }
