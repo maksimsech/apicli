@@ -59,6 +59,23 @@ pub enum Command {
         #[command(subcommand)]
         command: PolicyCommand,
     },
+    #[command(about = "Set per-host rate limits (run by the user in a terminal)")]
+    Limit {
+        #[command(subcommand)]
+        command: LimitCommand,
+    },
+    #[command(about = "Show recent requests from the audit log")]
+    Log {
+        #[arg(
+            long,
+            value_name = "COUNT",
+            default_value_t = 20,
+            help = "How many entries to show"
+        )]
+        tail: usize,
+        #[arg(long, help = "Print JSON lines")]
+        json: bool,
+    },
     #[command(about = "Set or remove the admin password (run by the user in a terminal)")]
     Password {
         #[command(subcommand)]
@@ -123,6 +140,21 @@ pub enum DenyCommand {
         method: String,
         path: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LimitCommand {
+    #[command(about = "Limit HOST to RATE, like 60/min")]
+    Set {
+        host: String,
+        rate: String,
+        #[arg(long, help = "Requests allowed at once, defaults to the rate's count")]
+        burst: Option<u32>,
+        #[arg(long, help = "Requests allowed per UTC day")]
+        daily: Option<u32>,
+    },
+    #[command(about = "Remove the limits on HOST")]
+    Rm { host: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -246,6 +278,15 @@ pub struct RequestArgs {
     pub user_agent: Option<String>,
     #[arg(short = 'e', long, value_name = "URL", help = "Referer header")]
     pub referer: Option<String>,
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "30",
+        help = "Wait up to SECONDS (default 30) for the rate limit instead of failing"
+    )]
+    pub wait: Option<f64>,
     #[arg(short = 'L', long, help = "Follow redirects, checking every hop")]
     pub location: bool,
     #[arg(

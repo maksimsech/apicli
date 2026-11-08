@@ -1,13 +1,14 @@
 use std::{
+    collections::BTreeMap,
     fs::{self, DirBuilder, OpenOptions},
-    io::{self, ErrorKind, Write},
+    io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
-use apicli_core::Vault;
+use apicli_core::{Bucket, Vault};
 use aws_lc_rs::digest::{SHA256, digest};
 use directories::ProjectDirs;
 use thiserror::Error;
@@ -76,6 +77,49 @@ impl Store {
         }
     }
 
+    pub fn update_buckets<T>(
+        &self,
+        change: impl FnOnce(&mut BTreeMap<String, Bucket>) -> T,
+    ) -> Result<T, VaultError> {
+        self.create_dir()?;
+        let mut file = private_options()
+            .read(true)
+            .open(self.dir.join("ratelimit.state"))?;
+        file.lock()?;
+        let mut text = String::new();
+        file.read_to_string(&mut text)?;
+        let mut buckets = serde_json::from_str(&text).unwrap_or_default();
+        let result = change(&mut buckets);
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&serde_json::to_vec(&buckets).map_err(io::Error::other)?)?;
+        Ok(result)
+    }
+
+    pub fn read_buckets(&self) -> BTreeMap<String, Bucket> {
+        fs::read_to_string(self.dir.join("ratelimit.state"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn append_log(&self, line: &str) -> io::Result<()> {
+        self.create_dir()?;
+        let mut file = private_options().append(true).open(self.log_path())?;
+        writeln!(file, "{line}")
+    }
+
+    pub fn read_log(&self) -> io::Result<String> {
+        match fs::read_to_string(self.log_path()) {
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(String::new()),
+            result => result,
+        }
+    }
+
+    pub fn log_path(&self) -> PathBuf {
+        self.dir.join("audit.log")
+    }
+
     pub fn write_policy(&self, vault: &mut Vault, text: &str) -> Result<(), VaultError> {
         self.create_dir()?;
         write_private(&self.policy_path(), text.as_bytes())?;
@@ -131,12 +175,19 @@ impl Store {
 
 pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temp = path.with_extension("tmp");
+    private_options()
+        .truncate(true)
+        .open(&temp)?
+        .write_all(bytes)?;
+    fs::rename(temp, path)
+}
+
+fn private_options() -> OpenOptions {
     let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create(true);
     #[cfg(unix)]
     options.mode(0o600);
-    options.open(&temp)?.write_all(bytes)?;
-    fs::rename(temp, path)
+    options
 }
 
 fn hash(text: &str) -> String {

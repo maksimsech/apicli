@@ -1,4 +1,5 @@
 mod admin;
+mod audit;
 mod cli;
 mod failure;
 mod info;
@@ -40,6 +41,8 @@ async fn run() -> Result<u8, Failure> {
         Some(Command::Allow { command }) => rules::allow(command),
         Some(Command::Deny { command }) => rules::deny(command),
         Some(Command::Policy { command }) => rules::policy(command),
+        Some(Command::Limit { command }) => rules::limit(command),
+        Some(Command::Log { tail, json }) => audit::log(tail, json),
         Some(Command::Skill { command }) => skill::skill(command),
         None => request::send(cli.request).await,
     }

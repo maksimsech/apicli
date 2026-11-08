@@ -34,6 +34,8 @@ pub enum Failure {
     #[error("{0}")]
     Denied(String),
     #[error("{0}")]
+    Limited(String),
+    #[error("{0}")]
     Unconfigured(String),
     #[error("{0}")]
     Integrity(String),
@@ -56,9 +58,23 @@ impl Failure {
             Self::Redirects(_) => 47,
             Self::Network(_) => 56,
             Self::Denied(_) => 110,
+            Self::Limited(_) => 111,
             Self::Unconfigured(_) => 112,
             Self::Integrity(_) => 113,
             Self::Keystore(_) => 114,
+        }
+    }
+}
+
+impl Failure {
+    pub fn outcome(&self) -> &'static str {
+        match self.code() {
+            110 => "denied",
+            111 => "limited",
+            112 => "unconfigured",
+            113 | 114 => "broken",
+            1..=3 => "invalid",
+            _ => "failed",
         }
     }
 }

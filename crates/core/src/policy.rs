@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt};
 use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 
-use crate::{Denial, Origin, READ_METHODS};
+use crate::{Denial, Limits, Origin, READ_METHODS, Rate};
 
 pub const METHOD_OVERRIDES: [&str; 3] = [
     "x-http-method-override",
@@ -23,6 +23,12 @@ pub struct Policy {
 pub struct HostPolicy {
     #[serde(default = "read_methods")]
     pub methods: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<Rate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub burst: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<Rule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -92,6 +98,9 @@ impl Default for HostPolicy {
     fn default() -> Self {
         HostPolicy {
             methods: read_methods(),
+            rate: None,
+            burst: None,
+            daily: None,
             allow: Vec::new(),
             deny: Vec::new(),
         }
@@ -123,6 +132,14 @@ impl HostPolicy {
             }
         }
         Err(problem.map_or(Denial::NotAllowed, Denial::Body))
+    }
+
+    pub fn limits(&self) -> Limits {
+        Limits {
+            rate: self.rate,
+            burst: self.burst,
+            daily: self.daily,
+        }
     }
 
     pub fn summary(&self) -> String {

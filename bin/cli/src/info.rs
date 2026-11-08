@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::{
     admin::add_hint,
     failure::Failure,
-    request::{denied, parse_url},
+    request::{denied, now, parse_url},
     rules::load_policy,
 };
 
@@ -17,6 +17,9 @@ struct Host {
     methods: Vec<String>,
     allow: Vec<String>,
     deny: Vec<String>,
+    limit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remaining: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -36,6 +39,8 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
     let policy = load_policy(&store, &vault)?;
+    let buckets = store.read_buckets();
+    let now = now();
     let hosts = vault
         .credentials
         .iter()
@@ -48,6 +53,12 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
                 methods: rules.methods.clone(),
                 allow: rules.allow.iter().map(describe).collect(),
                 deny: rules.deny.iter().map(Rule::to_string).collect(),
+                limit: rules.limits().to_string(),
+                remaining: buckets
+                    .get(&credential.origin.to_string())
+                    .cloned()
+                    .unwrap_or_default()
+                    .remaining(&rules.limits(), now),
             }
         })
         .collect::<Vec<_>>();
@@ -68,6 +79,10 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
             }
             for rule in host.deny {
                 println!("  deny: {rule}");
+            }
+            match host.remaining {
+                Some(remaining) => println!("  limit: {}, {remaining} left now", host.limit),
+                None => println!("  limit: {}", host.limit),
             }
         }
     }

@@ -7,7 +7,7 @@ use std::{
 use apicli_core::Redactor;
 use reqwest::{Method, Response, Version, header::CONTENT_TYPE};
 
-use crate::{cli::RequestArgs, failure::Failure};
+use crate::{audit::Entry, cli::RequestArgs, failure::Failure};
 
 pub async fn write(
     mut response: Response,
@@ -16,8 +16,10 @@ pub async fn write(
     started: Instant,
     mut redactor: Redactor,
     stdout: &mut dyn Write,
+    entry: &mut Entry,
 ) -> Result<u8, Failure> {
     let status = response.status();
+    entry.status = Some(status.as_u16());
     let failed = status.is_client_error() || status.is_server_error();
     let quiet = failed && args.fail && !args.fail_with_body;
     if args.verbose {
@@ -59,6 +61,7 @@ pub async fn write(
         }
         out.flush().map_err(write_failure)?;
     }
+    entry.bytes = Some(size);
     if let Some(template) = &args.write_out {
         let code = format!("{:03}", status.as_u16());
         let text = expand(

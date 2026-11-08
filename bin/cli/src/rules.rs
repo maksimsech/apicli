@@ -5,12 +5,12 @@ use std::{
     process::{self, Command},
 };
 
-use apicli_core::{HostPolicy, Origin, Policy, READ_METHODS, Rule, Vault};
+use apicli_core::{HostPolicy, Origin, Policy, READ_METHODS, Rate, Rule, Vault};
 use apicli_vault::Store;
 
 use crate::{
     admin::authenticate,
-    cli::{AllowCommand, DenyCommand, PolicyCommand},
+    cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand},
     failure::Failure,
 };
 
@@ -94,6 +94,35 @@ pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
                 "Removed deny {} {path} on {origin}",
                 method.to_ascii_uppercase()
             )
+        }
+    };
+    finish(&store, &mut vault, &policy, &message)
+}
+
+pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
+    let (store, mut vault, mut policy) = open_for_change()?;
+    let message = match command {
+        LimitCommand::Set {
+            host,
+            rate,
+            burst,
+            daily,
+        } => {
+            let origin = Origin::parse(&host).map_err(Failure::Usage)?;
+            let rate = Rate::parse(&rate).map_err(Failure::Usage)?;
+            let host = policy.hosts.entry(origin.clone()).or_default();
+            host.rate = Some(rate);
+            host.burst = burst;
+            host.daily = daily;
+            format!("Limited {origin} to {}", host.limits())
+        }
+        LimitCommand::Rm { host } => {
+            let origin = Origin::parse(&host).map_err(Failure::Usage)?;
+            let host = policy.hosts.entry(origin.clone()).or_default();
+            host.rate = None;
+            host.burst = None;
+            host.daily = None;
+            format!("Removed the limits on {origin}")
         }
     };
     finish(&store, &mut vault, &policy, &message)

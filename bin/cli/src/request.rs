@@ -2,17 +2,18 @@ use std::{
     collections::HashSet,
     fs,
     io::{Read, Write, stdin, stdout},
-    time::{Duration, Instant},
+    thread::sleep,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use apicli_core::{
-    Body, Credential, Denial, METHOD_OVERRIDES, Origin, Policy, Redactor, UNRESERVED, Vault,
-    authorize,
+    Body, Credential, Denial, Grant, Limits, METHOD_OVERRIDES, Origin, Policy, Redactor,
+    UNRESERVED, Vault, Wait, authorize,
 };
 use apicli_vault::Store;
 use percent_encoding::percent_encode;
 use reqwest::{
-    Client, Method, Response,
+    Client, Method, Response, StatusCode,
     header::{
         ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, LOCATION, REFERER, USER_AGENT,
     },
@@ -21,20 +22,45 @@ use reqwest::{
 use secrecy::ExposeSecret;
 use url::{ParseError, Url};
 
-use crate::{admin::add_hint, cli::RequestArgs, failure::Failure, response, rules::load_policy};
+use crate::{
+    admin::add_hint, audit, audit::Entry, cli::RequestArgs, failure::Failure, response,
+    rules::load_policy,
+};
 
 pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
     let policy = load_policy(&store, &vault)?;
-    perform(&args, &vault, &policy, &mut stdout().lock()).await
+    let mut entry = Entry::start();
+    let started = Instant::now();
+    let result = perform(
+        &args,
+        &store,
+        &vault,
+        &policy,
+        &mut stdout().lock(),
+        &mut entry,
+    )
+    .await;
+    entry.ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match &result {
+        Ok(_) => entry.outcome = "sent".into(),
+        Err(failure) => {
+            entry.outcome = failure.outcome().into();
+            entry.error = failure.to_string().lines().next().map(String::from);
+        }
+    }
+    audit::record(&store, &entry);
+    result
 }
 
 pub async fn perform(
     args: &RequestArgs,
+    store: &Store,
     vault: &Vault,
     policy: &Policy,
     stdout: &mut dyn Write,
+    entry: &mut Entry,
 ) -> Result<u8, Failure> {
     let mut url = parse_url(args.url.as_deref().unwrap_or_default())?;
     let form = form_parts(args)?;
@@ -76,14 +102,26 @@ pub async fn perform(
     let started = Instant::now();
     let mut redirects = 0;
     loop {
+        entry.method = method.to_string();
+        entry.url = String::from_utf8_lossy(&redactor.redact(url.as_str().as_bytes())).into_owned();
         let view = body.as_ref().map(|bytes| Body {
             len: bytes.len(),
             content_type: headers
                 .get(CONTENT_TYPE)
                 .and_then(|value| value.to_str().ok()),
         });
-        let (credential, _) = authorize(&url, method.as_str(), view, vault, policy)
+        let (credential, grant) = authorize(&url, method.as_str(), view, vault, policy)
             .map_err(|denial| denied(denial, &url, method.as_str(), vault, policy))?;
+        entry.rule = Some(match grant {
+            Grant::Default => "default".into(),
+            Grant::Rule(rule) => format!("allow {rule}"),
+        });
+        take(
+            store,
+            &credential.origin,
+            &policy.host(&credential.origin).limits(),
+            args.wait,
+        )?;
         let request_headers = with_credential(&headers, credential)?;
         if args.verbose {
             for line in request_lines(&method, &url, &request_headers) {
@@ -100,13 +138,23 @@ pub async fn perform(
             request = request.body(body.clone());
         }
         let response = request.send().await?;
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            let until = now() + retry_after(&response);
+            store.update_buckets(|buckets| {
+                buckets
+                    .entry(credential.origin.to_string())
+                    .or_default()
+                    .block(until)
+            })?;
+        }
         let next = if args.location {
             redirect_target(&response)
         } else {
             None
         };
         let Some(next) = next else {
-            return response::write(response, args, &method, started, redactor, stdout).await;
+            return response::write(response, args, &method, started, redactor, stdout, entry)
+                .await;
         };
         if redirects == args.max_redirs {
             return Err(Failure::Redirects(redirects));
@@ -124,6 +172,56 @@ pub async fn perform(
         }
         url = next;
     }
+}
+
+fn take(store: &Store, origin: &Origin, limits: &Limits, wait: Option<f64>) -> Result<(), Failure> {
+    let deadline = wait.map(|seconds| now() + (seconds.max(0.0) * 1000.0) as u64);
+    loop {
+        let current = now();
+        let result = store.update_buckets(|buckets| {
+            buckets
+                .entry(origin.to_string())
+                .or_default()
+                .take(limits, current)
+        })?;
+        let Err(wait) = result else {
+            return Ok(());
+        };
+        if deadline.is_some_and(|deadline| current + wait.millis() <= deadline) {
+            sleep(Duration::from_millis(wait.millis()));
+            continue;
+        }
+        let seconds = wait.millis() as f64 / 1000.0;
+        let reason = match wait {
+            Wait::Rate(_) => format!("rate limited on {origin} ({limits}), retry in {seconds:.1}s"),
+            Wait::Daily(_) => format!(
+                "the daily limit for {origin} is used up ({limits}), it resets in {seconds:.0}s"
+            ),
+            Wait::Upstream(_) => {
+                format!("{origin} answered 429 Too Many Requests, retry in {seconds:.0}s")
+            }
+        };
+        return Err(Failure::Limited(format!(
+            "{reason}\nrerun with --wait to wait for it"
+        )));
+    }
+}
+
+fn retry_after(response: &Response) -> u64 {
+    response
+        .headers()
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map_or(60_000, |seconds| seconds.saturating_mul(1000))
+}
+
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn redirect_target(response: &Response) -> Option<Url> {

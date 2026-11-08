@@ -9,7 +9,7 @@ apicli is curl for APIs that need credentials. It adds the right key for each ho
 
 ## First
 
-Run `apicli hosts` to see which hosts are configured and what is allowed on each. Requests to other hosts are refused.
+Run `apicli hosts` to see which hosts are configured, what is allowed on each, and how many requests the rate limit leaves right now. Requests to other hosts are refused.
 
 Before a write, run `apicli explain POST URL` to check whether it's allowed without sending anything.
 
@@ -34,13 +34,14 @@ Use it like curl, with one URL per call:
 
 ## Flags
 
-Supported: -X, -H, -d, --data-raw, --data-binary, --data-urlencode, --json, -G, -I, -i, -L, --max-redirs, -f, --fail-with-body, -o, -w, -m, --connect-timeout, --compressed, -A, -e, -v. Run `apicli --help` for details.
+Supported: -X, -H, -d, --data-raw, --data-binary, --data-urlencode, --json, -G, -I, -i, -L, --max-redirs, -f, --fail-with-body, -o, -w, -m, --connect-timeout, --compressed, -A, -e, -v, and apicli's own --wait. Run `apicli --help` for details.
 
 Refused flags, such as -k, -x, --resolve, -u and -b, print the reason. Drop the flag and retry.
 
 ## When a call fails
 
 - 110, denied: the method or path is not allowed. stderr has an `apicli allow add ...` line when the user can allow it. Show it to the user and wait. Don't retry another way.
+- 111, rate limited: stderr says how long to wait. Wait, or rerun with `--wait` (up to 30s) or `--wait=SECONDS`. Don't loop on retries.
 - 112, host not configured: show the user the `apicli secret add ...` line from stderr and wait. Use plain curl only if the API needs no credentials.
 - 113 or 114: apicli's setup is broken or the keychain is unavailable. Tell the user. Don't touch apicli's files.
 - 2: unsupported flag or bad arguments. stderr names the problem.
