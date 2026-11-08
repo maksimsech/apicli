@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{
     Arg, ArgAction, Args, ColorChoice, CommandFactory, Error, FromArgMatches, Parser, Subcommand,
-    ValueEnum, error::ErrorKind, parser::ValueSource,
+    ValueEnum, error::ErrorKind, parser::ValueSource, value_parser,
 };
 
 use crate::failure::Failure;
@@ -54,7 +54,7 @@ pub enum Command {
         #[command(subcommand)]
         command: DenyCommand,
     },
-    #[command(about = "Show, edit or verify policy.toml")]
+    #[command(about = "Show or edit the policy")]
     Policy {
         #[command(subcommand)]
         command: PolicyCommand,
@@ -66,6 +66,8 @@ pub enum Command {
     },
     #[command(about = "Show recent requests from the audit log")]
     Log {
+        #[command(subcommand)]
+        command: Option<LogCommand>,
         #[arg(
             long,
             value_name = "COUNT",
@@ -159,12 +161,21 @@ pub enum LimitCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PolicyCommand {
-    #[command(about = "Print policy.toml")]
+    #[command(about = "Print the policy as TOML")]
     Show,
-    #[command(about = "Edit policy.toml in $EDITOR and accept the result")]
+    #[command(about = "Edit the policy in $EDITOR (run by the user in a terminal)")]
     Edit,
-    #[command(about = "Check that policy.toml is intact")]
-    Verify,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LogCommand {
+    #[command(
+        about = "Keep the audit log under MB megabytes, dropping the oldest entries (run by the user in a terminal)"
+    )]
+    Limit {
+        #[arg(value_parser = value_parser!(u32).range(1..))]
+        mb: u32,
+    },
 }
 
 #[derive(Debug, Subcommand)]

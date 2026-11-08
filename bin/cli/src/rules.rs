@@ -5,7 +5,10 @@ use std::{
     process::{self, Command},
 };
 
-use apicli_core::{HostPolicy, Origin, Policy, READ_METHODS, Rate, Rule, Vault};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+use apicli_core::{Origin, Policy, Rate, Rule, Vault};
 use apicli_vault::Store;
 
 use crate::{
@@ -14,16 +17,11 @@ use crate::{
     failure::Failure,
 };
 
-pub fn load_policy(store: &Store, vault: &Vault) -> Result<Policy, Failure> {
-    match store.read_policy(vault)? {
-        Some(text) => Policy::parse(&text)
-            .map_err(|error| Failure::Integrity(format!("policy.toml is invalid: {error}"))),
-        None => Ok(Policy::default()),
-    }
-}
+const DEFAULT_EDITOR: &str = if cfg!(windows) { "notepad" } else { "vi" };
 
 pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
-    let (store, mut vault, mut policy) = open_for_change()?;
+    let (store, mut vault) = open_for_change()?;
+    let policy = &mut vault.policy;
     let message = match command {
         AllowCommand::Add {
             host,
@@ -61,11 +59,12 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
             )
         }
     };
-    finish(&store, &mut vault, &policy, &message)
+    finish(&store, &vault, &message)
 }
 
 pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
-    let (store, mut vault, mut policy) = open_for_change()?;
+    let (store, mut vault) = open_for_change()?;
+    let policy = &mut vault.policy;
     let message = match command {
         DenyCommand::Add { host, method, path } => {
             let origin = Origin::parse(&host).map_err(Failure::Usage)?;
@@ -96,11 +95,12 @@ pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
             )
         }
     };
-    finish(&store, &mut vault, &policy, &message)
+    finish(&store, &vault, &message)
 }
 
 pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
-    let (store, mut vault, mut policy) = open_for_change()?;
+    let (store, mut vault) = open_for_change()?;
+    let policy = &mut vault.policy;
     let message = match command {
         LimitCommand::Set {
             host,
@@ -125,47 +125,46 @@ pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
             format!("Removed the limits on {origin}")
         }
     };
-    finish(&store, &mut vault, &policy, &message)
+    finish(&store, &vault, &message)
+}
+
+pub fn log_limit(mb: u32) -> Result<u8, Failure> {
+    let (store, mut vault) = open_for_change()?;
+    vault.policy.log_limit_mb = mb;
+    finish(
+        &store,
+        &vault,
+        &format!("The audit log is now kept under {mb} MB"),
+    )
 }
 
 pub fn policy(command: PolicyCommand) -> Result<u8, Failure> {
-    if matches!(command, PolicyCommand::Edit) {
-        require_terminal()?;
-    }
-    let store = Store::open()?;
-    let mut vault = store.load()?;
     match command {
-        PolicyCommand::Show => match store.read_policy(&vault)? {
-            Some(text) => print!("{text}"),
-            None => println!(
-                "No policy.toml yet. Every configured host allows {}.",
-                READ_METHODS.join(", ")
-            ),
-        },
-        PolicyCommand::Verify => {
-            load_policy(&store, &vault)?;
-            println!("{} is intact", store.policy_path().display());
+        PolicyCommand::Show => {
+            let vault = Store::open()?.load()?;
+            print!(
+                "{}",
+                effective(&vault).to_toml().map_err(Failure::Integrity)?
+            );
+            Ok(0)
         }
         PolicyCommand::Edit => {
-            authenticate(&store, &mut vault)?;
-            edit(&store, &mut vault)?;
+            let (store, mut vault) = open_for_change()?;
+            vault.policy = edit(&effective(&vault))?;
+            finish(&store, &vault, "Saved the policy")
         }
     }
-    Ok(0)
 }
 
-fn open_for_change() -> Result<(Store, Vault, Policy), Failure> {
+fn open_for_change() -> Result<(Store, Vault), Failure> {
     require_terminal()?;
     let store = Store::open()?;
     let mut vault = store.load()?;
     authenticate(&store, &mut vault)?;
-    let policy = load_policy(&store, &vault)?;
-    Ok((store, vault, policy))
+    Ok((store, vault))
 }
 
-fn finish(store: &Store, vault: &mut Vault, policy: &Policy, message: &str) -> Result<u8, Failure> {
-    let text = policy.to_toml().map_err(Failure::Integrity)?;
-    store.write_policy(vault, &text)?;
+fn finish(store: &Store, vault: &Vault, message: &str) -> Result<u8, Failure> {
     store.save(vault)?;
     println!("{message}");
     Ok(0)
@@ -187,61 +186,65 @@ fn remove(rules: &mut Vec<Rule>, method: &str, path: &str) -> Result<(), Failure
     }
 }
 
-fn edit(store: &Store, vault: &mut Vault) -> Result<(), Failure> {
-    let current = match store.read_policy_unchecked()? {
-        Some(text) => text,
-        None => starter(vault)?,
-    };
+fn effective(vault: &Vault) -> Policy {
+    let mut policy = vault.policy.clone();
+    for credential in &vault.credentials {
+        policy.hosts.entry(credential.origin.clone()).or_default();
+    }
+    policy
+}
+
+fn edit(policy: &Policy) -> Result<Policy, Failure> {
     let draft = env::temp_dir().join(format!("apicli-policy-{}.toml", process::id()));
-    fs::write(&draft, current).map_err(|error| Failure::Write(error.to_string()))?;
-    let result = edit_loop(store, vault, &draft);
+    let text = policy.to_toml().map_err(Failure::Integrity)?;
+    fs::write(&draft, text).map_err(|error| Failure::Write(error.to_string()))?;
+    let result = edit_loop(&draft);
     let _ = fs::remove_file(&draft);
     result
 }
 
-fn edit_loop(store: &Store, vault: &mut Vault, draft: &Path) -> Result<(), Failure> {
+fn edit_loop(draft: &Path) -> Result<Policy, Failure> {
     let editor = env::var("VISUAL")
         .or_else(|_| env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".into());
+        .unwrap_or_else(|_| DEFAULT_EDITOR.into());
     loop {
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(format!("{editor} \"$1\""))
-            .arg("sh")
-            .arg(draft)
+        let status = editor_command(&editor, draft)
             .status()
             .map_err(|error| Failure::Usage(format!("could not start {editor}: {error}")))?;
         if !status.success() {
             return Err(Failure::Usage(
-                "the editor failed, policy.toml was not changed".into(),
+                "the editor failed, the policy was not changed".into(),
             ));
         }
         let text = fs::read_to_string(draft).map_err(|error| Failure::Read(error.to_string()))?;
-        match Policy::parse(&text) {
-            Ok(_) => {
-                store.write_policy(vault, &text)?;
-                store.save(vault)?;
-                println!("Saved {}", store.policy_path().display());
-                return Ok(());
-            }
+        match Policy::parse(text.trim_start_matches('\u{feff}')) {
+            Ok(policy) => return Ok(policy),
             Err(error) => {
-                eprintln!("apicli: policy.toml is invalid: {error}");
+                eprintln!("apicli: the policy is invalid: {error}");
                 if !confirm("Edit again? [Y/n] ")? {
-                    return Err(Failure::Usage("policy.toml was not changed".into()));
+                    return Err(Failure::Usage("the policy was not changed".into()));
                 }
             }
         }
     }
 }
 
-fn starter(vault: &Vault) -> Result<String, Failure> {
-    let mut policy = Policy::default();
-    for credential in &vault.credentials {
-        policy
-            .hosts
-            .insert(credential.origin.clone(), HostPolicy::default());
-    }
-    policy.to_toml().map_err(Failure::Integrity)
+#[cfg(not(windows))]
+fn editor_command(editor: &str, draft: &Path) -> Command {
+    let mut command = Command::new("sh");
+    command
+        .arg("-c")
+        .arg(format!("{editor} \"$1\""))
+        .arg("sh")
+        .arg(draft);
+    command
+}
+
+#[cfg(windows)]
+fn editor_command(editor: &str, draft: &Path) -> Command {
+    let mut command = Command::new("cmd");
+    command.raw_arg(format!("/S /C \"{editor} \"{}\"\"", draft.display()));
+    command
 }
 
 fn confirm(question: &str) -> Result<bool, Failure> {

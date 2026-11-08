@@ -1,6 +1,6 @@
 use url::Url;
 
-use crate::{Body, Credential, Grant, Origin, Policy, Rule, Vault};
+use crate::{Body, Credential, Grant, Origin, Rule, Vault};
 
 pub const READ_METHODS: [&str; 3] = ["GET", "HEAD", "OPTIONS"];
 
@@ -20,7 +20,6 @@ pub fn authorize<'a>(
     method: &str,
     body: Option<Body>,
     vault: &'a Vault,
-    policy: &Policy,
 ) -> Result<(&'a Credential, Grant), Denial> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err(Denial::Userinfo);
@@ -41,7 +40,7 @@ pub fn authorize<'a>(
         .iter()
         .find(|credential| credential.origin == origin)
         .ok_or_else(|| Denial::Unconfigured(origin.to_string()))?;
-    let grant = policy.host(&origin).check(method, url.path(), body)?;
+    let grant = vault.policy.host(&origin).check(method, url.path(), body)?;
     Ok((credential, grant))
 }
 
@@ -66,14 +65,8 @@ mod tests {
 
     fn check(url: &str, method: &str) -> Result<String, Denial> {
         let vault = vault();
-        authorize(
-            &Url::parse(url).unwrap(),
-            method,
-            None,
-            &vault,
-            &Policy::default(),
-        )
-        .map(|(credential, _)| credential.name.clone())
+        authorize(&Url::parse(url).unwrap(), method, None, &vault)
+            .map(|(credential, _)| credential.name.clone())
     }
 
     #[test]
@@ -105,7 +98,7 @@ mod tests {
         let vault = vault();
 
         assert!(matches!(
-            authorize(&next, "GET", None, &vault, &Policy::default()),
+            authorize(&next, "GET", None, &vault),
             Err(Denial::Unconfigured(_))
         ));
     }

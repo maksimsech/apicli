@@ -12,7 +12,7 @@ mod skill;
 
 use std::{env, process::ExitCode};
 
-use cli::{Command, parse};
+use cli::{Command, LogCommand, parse};
 use failure::Failure;
 
 #[tokio::main(flavor = "current_thread")]
@@ -44,7 +44,15 @@ async fn run() -> Result<u8, Failure> {
         Some(Command::Deny { command }) => rules::deny(command),
         Some(Command::Policy { command }) => rules::policy(command),
         Some(Command::Limit { command }) => rules::limit(command),
-        Some(Command::Log { tail, json }) => audit::log(tail, json),
+        Some(Command::Log {
+            command: Some(LogCommand::Limit { mb }),
+            ..
+        }) => rules::log_limit(mb),
+        Some(Command::Log {
+            command: None,
+            tail,
+            json,
+        }) => audit::log(tail, json),
         Some(Command::Skill { command }) => skill::skill(command),
         None => request::send(cli.request).await,
     }

@@ -9,7 +9,6 @@ use std::{
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
 use apicli_core::{Bucket, Vault};
-use aws_lc_rs::digest::{SHA256, digest};
 use directories::ProjectDirs;
 use thiserror::Error;
 use zeroize::Zeroizing;
@@ -24,12 +23,6 @@ pub enum VaultError {
     Keystore(String),
     #[error("{0} can't be decrypted. Remove it to start over, which deletes every stored secret")]
     Corrupt(PathBuf),
-    #[error("{0} was changed outside apicli. Run apicli policy edit to review and accept it")]
-    PolicyChanged(PathBuf),
-    #[error("{0} is missing. Run apicli policy edit to write a new one")]
-    PolicyMissing(PathBuf),
-    #[error("{0} was not written by apicli. Run apicli policy edit to review and accept it")]
-    PolicyUnexpected(PathBuf),
     #[error("{0}")]
     Io(#[from] io::Error),
 }
@@ -42,39 +35,12 @@ impl Store {
     pub fn open() -> Result<Store, VaultError> {
         let dirs = ProjectDirs::from("dev", "", "apicli").ok_or(VaultError::NoHome)?;
         Ok(Store {
-            dir: dirs.data_dir().to_path_buf(),
+            dir: dirs.data_local_dir().to_path_buf(),
         })
     }
 
     pub fn at(dir: PathBuf) -> Store {
         Store { dir }
-    }
-
-    pub fn dir(&self) -> &Path {
-        &self.dir
-    }
-
-    pub fn policy_path(&self) -> PathBuf {
-        self.dir.join("policy.toml")
-    }
-
-    pub fn read_policy(&self, vault: &Vault) -> Result<Option<String>, VaultError> {
-        let path = self.policy_path();
-        match (&vault.policy_hash, self.read_policy_unchecked()?) {
-            (None, None) => Ok(None),
-            (None, Some(_)) => Err(VaultError::PolicyUnexpected(path)),
-            (Some(_), None) => Err(VaultError::PolicyMissing(path)),
-            (Some(expected), Some(text)) if *expected == hash(&text) => Ok(Some(text)),
-            (Some(_), Some(_)) => Err(VaultError::PolicyChanged(path)),
-        }
-    }
-
-    pub fn read_policy_unchecked(&self) -> Result<Option<String>, VaultError> {
-        match fs::read_to_string(self.policy_path()) {
-            Ok(text) => Ok(Some(text)),
-            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error.into()),
-        }
     }
 
     pub fn update_buckets<T>(
@@ -103,10 +69,27 @@ impl Store {
             .unwrap_or_default()
     }
 
-    pub fn append_log(&self, line: &str) -> io::Result<()> {
+    pub fn append_log(&self, line: &str, limit: u64) -> io::Result<()> {
         self.create_dir()?;
-        let mut file = private_options().append(true).open(self.log_path())?;
-        writeln!(file, "{line}")
+        let mut file = private_options().read(true).open(self.log_path())?;
+        file.lock()?;
+        file.seek(SeekFrom::End(0))?;
+        writeln!(file, "{line}")?;
+        if file.metadata()?.len() <= limit {
+            return Ok(());
+        }
+        let mut text = Vec::new();
+        file.seek(SeekFrom::Start(0))?;
+        file.read_to_end(&mut text)?;
+        let keep = usize::try_from(limit / 4 * 3).unwrap_or(usize::MAX);
+        let start = text.len().saturating_sub(keep);
+        let start = text[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(text.len(), |index| start + index + 1);
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&text[start..])
     }
 
     pub fn read_log(&self) -> io::Result<String> {
@@ -116,35 +99,20 @@ impl Store {
         }
     }
 
-    pub fn log_path(&self) -> PathBuf {
-        self.dir.join("audit.log")
-    }
-
-    pub fn write_policy(&self, vault: &mut Vault, text: &str) -> Result<(), VaultError> {
-        self.create_dir()?;
-        write_private(&self.policy_path(), text.as_bytes())?;
-        vault.policy_hash = Some(hash(text));
-        Ok(())
-    }
-
-    pub fn master_key(&self) -> Result<Option<Zeroizing<Vec<u8>>>, VaultError> {
-        keystore::read(&self.dir)
-    }
-
     pub fn load(&self) -> Result<Vault, VaultError> {
         let path = self.vault_path();
         if !path.exists() {
             return Ok(Vault::default());
         }
         let corrupt = || VaultError::Corrupt(path.clone());
-        let key = self.master_key()?.ok_or_else(corrupt)?;
+        let key = keystore::read(&self.dir)?.ok_or_else(corrupt)?;
         let plain = sealed::open(&key, &fs::read(&path)?).ok_or_else(corrupt)?;
         serde_json::from_slice(&plain).map_err(|_| corrupt())
     }
 
     pub fn save(&self, vault: &Vault) -> Result<(), VaultError> {
         self.create_dir()?;
-        let key = match self.master_key()? {
+        let key = match keystore::read(&self.dir)? {
             Some(key) => key,
             None => {
                 let key = sealed::random_key()
@@ -162,6 +130,10 @@ impl Store {
 
     fn vault_path(&self) -> PathBuf {
         self.dir.join("vault.bin")
+    }
+
+    fn log_path(&self) -> PathBuf {
+        self.dir.join("audit.log")
     }
 
     fn create_dir(&self) -> io::Result<()> {
@@ -188,79 +160,4 @@ fn private_options() -> OpenOptions {
     #[cfg(unix)]
     options.mode(0o600);
     options
-}
-
-fn hash(text: &str) -> String {
-    digest(&SHA256, text.as_bytes())
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{env, process};
-
-    use super::*;
-
-    fn store(name: &str) -> Store {
-        let dir = env::temp_dir().join(format!("apicli-test-{}-{name}", process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        Store::at(dir)
-    }
-
-    #[test]
-    fn accepts_policy_it_wrote() {
-        let store = store("accepts");
-        let mut vault = Vault::default();
-        store.write_policy(&mut vault, "[hosts]\n").unwrap();
-
-        assert_eq!(
-            store.read_policy(&vault).unwrap().as_deref(),
-            Some("[hosts]\n")
-        );
-    }
-
-    #[test]
-    fn rejects_edited_policy() {
-        let store = store("edited");
-        let mut vault = Vault::default();
-        store.write_policy(&mut vault, "[hosts]\n").unwrap();
-        fs::write(
-            store.policy_path(),
-            "[hosts.\"https://attacker.example\"]\n",
-        )
-        .unwrap();
-
-        assert!(matches!(
-            store.read_policy(&vault),
-            Err(VaultError::PolicyChanged(_))
-        ));
-    }
-
-    #[test]
-    fn rejects_deleted_policy() {
-        let store = store("deleted");
-        let mut vault = Vault::default();
-        store.write_policy(&mut vault, "[hosts]\n").unwrap();
-        fs::remove_file(store.policy_path()).unwrap();
-
-        assert!(matches!(
-            store.read_policy(&vault),
-            Err(VaultError::PolicyMissing(_))
-        ));
-    }
-
-    #[test]
-    fn rejects_planted_policy() {
-        let store = store("planted");
-        store.create_dir().unwrap();
-        fs::write(store.policy_path(), "[hosts]\n").unwrap();
-
-        assert!(matches!(
-            store.read_policy(&Vault::default()),
-            Err(VaultError::PolicyUnexpected(_))
-        ));
-    }
 }

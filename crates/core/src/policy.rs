@@ -11,10 +11,10 @@ pub const METHOD_OVERRIDES: [&str; 3] = [
     "x-method-override",
 ];
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Policy {
-    #[serde(default)]
+    pub log_limit_mb: u32,
     pub hosts: BTreeMap<Origin, HostPolicy>,
 }
 
@@ -73,6 +73,9 @@ fn is_false(value: &bool) -> bool {
 impl Policy {
     pub fn parse(text: &str) -> Result<Policy, String> {
         let policy: Policy = toml::from_str(text).map_err(|error| error.to_string())?;
+        if policy.log_limit_mb == 0 {
+            return Err("log_limit_mb must be at least 1".into());
+        }
         for (origin, host) in &policy.hosts {
             for method in &host.methods {
                 validate_method(method).map_err(|error| format!("{origin}: {error}"))?;
@@ -91,6 +94,15 @@ impl Policy {
 
     pub fn host(&self, origin: &Origin) -> HostPolicy {
         self.hosts.get(origin).cloned().unwrap_or_default()
+    }
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Policy {
+            log_limit_mb: 10,
+            hosts: BTreeMap::new(),
+        }
     }
 }
 

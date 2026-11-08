@@ -82,8 +82,6 @@ pub fn password(command: PasswordCommand) -> Result<u8, Failure> {
         PasswordCommand::Set => {
             if vault.admin.is_some() {
                 authenticate(&store, &mut vault)?;
-            } else {
-                require_terminal()?;
             }
             let first = read_secret("New admin password: ")?;
             let second = read_secret("Repeat it: ")?;

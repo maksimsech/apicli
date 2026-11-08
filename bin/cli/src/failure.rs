@@ -64,9 +64,7 @@ impl Failure {
             Self::Keystore(_) => 114,
         }
     }
-}
 
-impl Failure {
     pub fn outcome(&self) -> &'static str {
         match self.code() {
             110 => "denied",
@@ -83,11 +81,7 @@ impl From<VaultError> for Failure {
     fn from(error: VaultError) -> Self {
         match error {
             VaultError::NoHome | VaultError::Keystore(_) => Self::Keystore(error.to_string()),
-            VaultError::Corrupt(_)
-            | VaultError::PolicyChanged(_)
-            | VaultError::PolicyMissing(_)
-            | VaultError::PolicyUnexpected(_)
-            | VaultError::Io(_) => Self::Integrity(error.to_string()),
+            VaultError::Corrupt(_) | VaultError::Io(_) => Self::Integrity(error.to_string()),
         }
     }
 }

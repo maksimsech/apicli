@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use apicli_core::{Credential, HostPolicy, Origin, Policy, Rate, Rule, Vault};
+use apicli_core::{Credential, HostPolicy, Origin, Rate, Rule, Vault};
 use apicli_vault::Store;
 use secrecy::SecretString;
 
@@ -89,7 +89,11 @@ fn ok(_: &str) -> String {
 }
 
 fn vault(origin: &str) -> Vault {
-    Vault {
+    vault_with(origin, HostPolicy::default())
+}
+
+fn vault_with(origin: &str, host: HostPolicy) -> Vault {
+    let mut vault = Vault {
         credentials: vec![Credential {
             name: "test".into(),
             origin: Origin::parse(origin).unwrap(),
@@ -98,7 +102,12 @@ fn vault(origin: &str) -> Vault {
             secret: SecretString::from(SECRET),
         }],
         ..Vault::default()
-    }
+    };
+    vault
+        .policy
+        .hosts
+        .insert(Origin::parse(origin).unwrap(), host);
+    vault
 }
 
 fn store(name: &str) -> Store {
@@ -107,18 +116,7 @@ fn store(name: &str) -> Store {
     Store::at(dir)
 }
 
-fn policy(origin: &str, host: HostPolicy) -> Policy {
-    let mut policy = Policy::default();
-    policy.hosts.insert(Origin::parse(origin).unwrap(), host);
-    policy
-}
-
-async fn run(
-    args: &[&str],
-    vault: &Vault,
-    policy: &Policy,
-    store: &Store,
-) -> (Result<u8, Failure>, String, Entry) {
+async fn run(args: &[&str], vault: &Vault, store: &Store) -> (Result<u8, Failure>, String, Entry) {
     let cli = parse(
         ["apicli"]
             .iter()
@@ -129,7 +127,7 @@ async fn run(
     .unwrap();
     let mut out = Vec::new();
     let mut entry = Entry::default();
-    let result = perform(&cli.request, store, vault, policy, &mut out, &mut entry).await;
+    let result = perform(&cli.request, store, vault, &mut out, &mut entry).await;
     (result, String::from_utf8_lossy(&out).into_owned(), entry)
 }
 
@@ -146,13 +144,7 @@ async fn echoed_key_is_redacted_everywhere() {
         Server::start(|request| reply("200 OK", &format!("X-Echo: {SECRET}\r\n"), request));
     let url = format!("{}/v1/echo?key={SECRET}", server.origin);
 
-    let (result, out, entry) = run(
-        &["-i", &url],
-        &vault(&server.origin),
-        &Policy::default(),
-        &store("echo"),
-    )
-    .await;
+    let (result, out, entry) = run(&["-i", &url], &vault(&server.origin), &store("echo")).await;
 
     assert_eq!(code(&result), 0);
     assert!(server.received().contains(&format!("x-api-key: {SECRET}")));
@@ -170,7 +162,6 @@ async fn redirect_to_another_origin_is_not_followed() {
     let (result, _, _) = run(
         &["-L", &format!("{}/v1/download", api.origin)],
         &vault(&api.origin),
-        &Policy::default(),
         &store("redirect"),
     )
     .await;
@@ -187,7 +178,6 @@ async fn unconfigured_host_receives_nothing() {
     let (result, _, _) = run(
         &[&other.origin],
         &vault(&api.origin),
-        &Policy::default(),
         &store("unconfigured"),
     )
     .await;
@@ -202,13 +192,7 @@ async fn writes_reach_the_server_only_through_an_allow_rule() {
     let url = format!("{}/v1/orders/1/notes", api.origin);
     let args = ["-X", "POST", "--json", "{\"note\":\"x\"}", url.as_str()];
 
-    let (denied, _, _) = run(
-        &args,
-        &vault(&api.origin),
-        &Policy::default(),
-        &store("write-denied"),
-    )
-    .await;
+    let (denied, _, _) = run(&args, &vault(&api.origin), &store("write-denied")).await;
 
     assert_eq!(code(&denied), 110);
     assert_eq!(api.count(), 0);
@@ -220,20 +204,14 @@ async fn writes_reach_the_server_only_through_an_allow_rule() {
         content_type: None,
         allow_body: false,
     };
-    let allowed = policy(
+    let allowed = vault_with(
         &api.origin,
         HostPolicy {
             allow: vec![rule],
             ..HostPolicy::default()
         },
     );
-    let (result, _, _) = run(
-        &args,
-        &vault(&api.origin),
-        &allowed,
-        &store("write-allowed"),
-    )
-    .await;
+    let (result, _, _) = run(&args, &allowed, &store("write-allowed")).await;
 
     assert_eq!(code(&result), 0);
     assert_eq!(api.count(), 1);
@@ -247,13 +225,7 @@ async fn proxy_environment_is_ignored() {
         unsafe { env::set_var(name, &proxy.origin) };
     }
 
-    let (result, _, _) = run(
-        &[&api.origin],
-        &vault(&api.origin),
-        &Policy::default(),
-        &store("proxy"),
-    )
-    .await;
+    let (result, _, _) = run(&[&api.origin], &vault(&api.origin), &store("proxy")).await;
 
     for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "ALL_PROXY"] {
         unsafe { env::remove_var(name) };
@@ -266,7 +238,7 @@ async fn proxy_environment_is_ignored() {
 #[tokio::test(flavor = "current_thread")]
 async fn runaway_loop_is_cut_at_the_rate_limit() {
     let api = Server::start(ok);
-    let limited = policy(
+    let limited = vault_with(
         &api.origin,
         HostPolicy {
             rate: Some(Rate::parse("3/min").unwrap()),
@@ -277,7 +249,7 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
     let mut codes = Vec::new();
 
     for _ in 0..5 {
-        let (result, _, _) = run(&[&api.origin], &vault(&api.origin), &limited, &store).await;
+        let (result, _, _) = run(&[&api.origin], &limited, &store).await;
         codes.push(code(&result));
     }
 
@@ -290,20 +262,8 @@ async fn upstream_429_blocks_the_host() {
     let api = Server::start(|_| reply("429 Too Many Requests", "Retry-After: 60\r\n", "slow down"));
     let store = store("429");
 
-    let (first, _, _) = run(
-        &[&api.origin],
-        &vault(&api.origin),
-        &Policy::default(),
-        &store,
-    )
-    .await;
-    let (second, _, _) = run(
-        &[&api.origin],
-        &vault(&api.origin),
-        &Policy::default(),
-        &store,
-    )
-    .await;
+    let (first, _, _) = run(&[&api.origin], &vault(&api.origin), &store).await;
+    let (second, _, _) = run(&[&api.origin], &vault(&api.origin), &store).await;
 
     assert_eq!(code(&first), 0);
     assert_eq!(code(&second), 111);

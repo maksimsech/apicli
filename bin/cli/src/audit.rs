@@ -55,10 +55,10 @@ impl Entry {
     }
 }
 
-pub fn record(store: &Store, entry: &Entry) {
+pub fn record(store: &Store, entry: &Entry, limit_mb: u32) {
     let result = serde_json::to_string(entry)
         .map_err(io::Error::other)
-        .and_then(|line| store.append_log(&line));
+        .and_then(|line| store.append_log(&line, u64::from(limit_mb) * 1_000_000));
     if let Err(error) = result {
         eprintln!("apicli: warning: could not write the audit log: {error}");
     }

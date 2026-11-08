@@ -2,7 +2,7 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn admin_commands_refuse_without_a_terminal() {
-    let commands: [&[&str]; 7] = [
+    let commands: [&[&str]; 8] = [
         &[
             "secret",
             "add",
@@ -16,6 +16,7 @@ fn admin_commands_refuse_without_a_terminal() {
         &["allow", "add", "api.example.com", "POST", "/v1/**"],
         &["deny", "rm", "api.example.com", "GET", "/v1/exports/**"],
         &["limit", "rm", "api.example.com"],
+        &["log", "limit", "5"],
         &["policy", "edit"],
         &["password", "remove"],
     ];

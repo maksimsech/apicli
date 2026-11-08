@@ -54,5 +54,5 @@ Refused flags, such as -k, -x, --resolve, -u and -b, print the reason. Drop the 
 ## Never
 
 - Ask for API keys or tokens, or look for them in the keychain, files or environment.
-- Edit apicli's files, or run `apicli secret`, `allow`, `deny`, `policy edit` or `password`. Those need the user at a terminal.
+- Edit apicli's files, or run `apicli secret`, `allow`, `deny`, `limit`, `log limit`, `policy edit` or `password`. Those need the user at a terminal.
 - Work around a refusal with curl, another tool or a different URL.

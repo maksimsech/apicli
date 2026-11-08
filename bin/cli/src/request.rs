@@ -7,8 +7,8 @@ use std::{
 };
 
 use apicli_core::{
-    Body, Credential, Denial, Grant, Limits, METHOD_OVERRIDES, Origin, Policy, Redactor,
-    UNRESERVED, Vault, Wait, authorize,
+    Body, Credential, Denial, Grant, Limits, METHOD_OVERRIDES, Origin, Redactor, UNRESERVED, Vault,
+    Wait, authorize,
 };
 use apicli_vault::Store;
 use percent_encoding::percent_encode;
@@ -22,26 +22,14 @@ use reqwest::{
 use secrecy::ExposeSecret;
 use url::{ParseError, Url};
 
-use crate::{
-    admin::add_hint, audit, audit::Entry, cli::RequestArgs, failure::Failure, response,
-    rules::load_policy,
-};
+use crate::{admin::add_hint, audit, audit::Entry, cli::RequestArgs, failure::Failure, response};
 
 pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
-    let policy = load_policy(&store, &vault)?;
     let mut entry = Entry::start();
     let started = Instant::now();
-    let result = perform(
-        &args,
-        &store,
-        &vault,
-        &policy,
-        &mut stdout().lock(),
-        &mut entry,
-    )
-    .await;
+    let result = perform(&args, &store, &vault, &mut stdout().lock(), &mut entry).await;
     entry.ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match &result {
         Ok(_) => entry.outcome = "sent".into(),
@@ -50,7 +38,7 @@ pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
             entry.error = failure.to_string().lines().next().map(String::from);
         }
     }
-    audit::record(&store, &entry);
+    audit::record(&store, &entry, vault.policy.log_limit_mb);
     result
 }
 
@@ -58,7 +46,6 @@ pub async fn perform(
     args: &RequestArgs,
     store: &Store,
     vault: &Vault,
-    policy: &Policy,
     stdout: &mut dyn Write,
     entry: &mut Entry,
 ) -> Result<u8, Failure> {
@@ -110,8 +97,8 @@ pub async fn perform(
                 .get(CONTENT_TYPE)
                 .and_then(|value| value.to_str().ok()),
         });
-        let (credential, grant) = authorize(&url, method.as_str(), view, vault, policy)
-            .map_err(|denial| denied(denial, &url, method.as_str(), vault, policy))?;
+        let (credential, grant) = authorize(&url, method.as_str(), view, vault)
+            .map_err(|denial| denied(denial, &url, method.as_str(), vault))?;
         entry.rule = Some(match grant {
             Grant::Default => "default".into(),
             Grant::Rule(rule) => format!("allow {rule}"),
@@ -119,7 +106,7 @@ pub async fn perform(
         take(
             store,
             &credential.origin,
-            &policy.host(&credential.origin).limits(),
+            &vault.policy.host(&credential.origin).limits(),
             args.wait,
         )?;
         let request_headers = with_credential(&headers, credential)?;
@@ -232,7 +219,7 @@ fn redirect_target(response: &Response) -> Option<Url> {
     response.url().join(location).ok()
 }
 
-pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault, policy: &Policy) -> Failure {
+pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault) -> Failure {
     let origin = Origin::of(url).map_or_else(|| url.to_string(), |origin| origin.to_string());
     let path = url.path();
     match denial {
@@ -251,7 +238,7 @@ pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault, policy: &P
         }
         Denial::NotAllowed => {
             let allowed = Origin::of(url)
-                .map(|origin| policy.host(&origin).summary())
+                .map(|origin| vault.policy.host(&origin).summary())
                 .unwrap_or_default();
             Failure::Denied(format!(
                 "denied: {method} {path} on {origin}\nallowed here: {allowed}\nto allow it, the user can run: apicli allow add {origin} {method} '{path}'"

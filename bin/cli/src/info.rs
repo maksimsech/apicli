@@ -6,7 +6,6 @@ use crate::{
     admin::add_hint,
     failure::Failure,
     request::{denied, now, parse_url},
-    rules::load_policy,
 };
 
 #[derive(Serialize)]
@@ -38,14 +37,13 @@ struct Explanation {
 pub fn hosts(json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
-    let policy = load_policy(&store, &vault)?;
     let buckets = store.read_buckets();
     let now = now();
     let hosts = vault
         .credentials
         .iter()
         .map(|credential| {
-            let rules = policy.host(&credential.origin);
+            let rules = vault.policy.host(&credential.origin);
             Host {
                 host: credential.origin.to_string(),
                 credential: credential.name.clone(),
@@ -90,9 +88,7 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
 }
 
 pub fn explain(method: &str, url: &str, json: bool) -> Result<u8, Failure> {
-    let store = Store::open()?;
-    let vault = store.load()?;
-    let policy = load_policy(&store, &vault)?;
+    let vault = Store::open()?.load()?;
     let url = parse_url(url)?;
     let method = method.to_ascii_uppercase();
     let mut explanation = Explanation {
@@ -103,21 +99,21 @@ pub fn explain(method: &str, url: &str, json: bool) -> Result<u8, Failure> {
         rule: None,
         reason: None,
     };
-    let code = match authorize(&url, &method, None, &vault, &policy) {
+    let code = match authorize(&url, &method, None, &vault) {
         Ok((credential, grant)) => {
             explanation.allowed = true;
             explanation.credential = Some(format!("{} ({})", credential.name, credential.header));
             explanation.rule = Some(match grant {
                 Grant::Default => format!(
                     "allowed: {}",
-                    policy.host(&credential.origin).methods.join(", ")
+                    vault.policy.host(&credential.origin).methods.join(", ")
                 ),
                 Grant::Rule(rule) => format!("allow: {}", describe(&rule)),
             });
             0
         }
         Err(denial) => {
-            let failure = denied(denial, &url, &method, &vault, &policy);
+            let failure = denied(denial, &url, &method, &vault);
             explanation.reason = Some(failure.to_string());
             failure.code()
         }

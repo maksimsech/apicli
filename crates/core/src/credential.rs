@@ -1,7 +1,7 @@
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::Origin;
+use crate::{Origin, Policy};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Credential {
@@ -38,7 +38,7 @@ pub struct Vault {
     #[serde(default)]
     pub admin: Option<Admin>,
     #[serde(default)]
-    pub policy_hash: Option<String>,
+    pub policy: Policy,
 }
 
 impl Vault {

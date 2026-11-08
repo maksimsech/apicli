@@ -4,6 +4,12 @@ identity := env("APICLI_SIGN_IDENTITY", "apicli local")
 d *args:
     cargo run --locked -p cli -- "$@"
 
+[macos]
 install:
     cargo install --locked --path bin/cli
     codesign --force --options runtime --identifier dev.apicli --sign "{{identity}}" ~/.cargo/bin/apicli
+
+[linux]
+[windows]
+install:
+    cargo install --locked --path bin/cli
