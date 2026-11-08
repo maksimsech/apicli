@@ -1,5 +1,7 @@
 mod admin;
 mod audit;
+#[cfg(test)]
+mod bypass;
 mod cli;
 mod failure;
 mod info;

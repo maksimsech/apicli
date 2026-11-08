@@ -20,6 +20,7 @@ pub fn add_hint(host: &str) -> String {
 }
 
 pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
+    require_terminal()?;
     let store = Store::open()?;
     let mut vault = store.load()?;
     authenticate(&store, &mut vault)?;
@@ -74,6 +75,7 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
 }
 
 pub fn password(command: PasswordCommand) -> Result<u8, Failure> {
+    require_terminal()?;
     let store = Store::open()?;
     let mut vault = store.load()?;
     let message = match command {

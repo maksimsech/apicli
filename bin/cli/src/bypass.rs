@@ -1,0 +1,311 @@
+use std::{
+    env, fs,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    process,
+    sync::{Arc, Mutex},
+    thread,
+};
+
+use apicli_core::{Credential, HostPolicy, Origin, Policy, Rate, Rule, Vault};
+use apicli_vault::Store;
+use secrecy::SecretString;
+
+use crate::{audit::Entry, cli::parse, failure::Failure, request::perform};
+
+const SECRET: &str = "sk-test-1234567890";
+
+struct Server {
+    origin: String,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+
+impl Server {
+    fn start(respond: impl Fn(&str) -> String + Send + 'static) -> Server {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let seen = requests.clone();
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let request = read_request(&mut stream);
+                seen.lock().unwrap().push(request.clone());
+                let _ = stream.write_all(respond(&request).as_bytes());
+            }
+        });
+        Server { origin, requests }
+    }
+
+    fn count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+
+    fn received(&self) -> String {
+        self.requests
+            .lock()
+            .unwrap()
+            .join("\n")
+            .to_ascii_lowercase()
+    }
+}
+
+fn read_request(stream: &mut TcpStream) -> String {
+    let mut data = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        let read = stream.read(&mut buffer).unwrap_or(0);
+        if read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read]);
+        let text = String::from_utf8_lossy(&data).into_owned();
+        if let Some(end) = text.find("\r\n\r\n") {
+            let length = text[..end]
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|value| value.trim().parse::<usize>().unwrap_or(0))
+                })
+                .unwrap_or(0);
+            if data.len() >= end + 4 + length {
+                break;
+            }
+        }
+    }
+    String::from_utf8_lossy(&data).into_owned()
+}
+
+fn reply(status: &str, headers: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}",
+        body.len()
+    )
+}
+
+fn ok(_: &str) -> String {
+    reply("200 OK", "", "ok")
+}
+
+fn vault(origin: &str) -> Vault {
+    Vault {
+        credentials: vec![Credential {
+            name: "test".into(),
+            origin: Origin::parse(origin).unwrap(),
+            header: "X-Api-Key".into(),
+            template: "{secret}".into(),
+            secret: SecretString::from(SECRET),
+        }],
+        ..Vault::default()
+    }
+}
+
+fn store(name: &str) -> Store {
+    let dir = env::temp_dir().join(format!("apicli-bypass-{}-{name}", process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    Store::at(dir)
+}
+
+fn policy(origin: &str, host: HostPolicy) -> Policy {
+    let mut policy = Policy::default();
+    policy.hosts.insert(Origin::parse(origin).unwrap(), host);
+    policy
+}
+
+async fn run(
+    args: &[&str],
+    vault: &Vault,
+    policy: &Policy,
+    store: &Store,
+) -> (Result<u8, Failure>, String, Entry) {
+    let cli = parse(
+        ["apicli"]
+            .iter()
+            .chain(args)
+            .map(|arg| arg.to_string())
+            .collect(),
+    )
+    .unwrap();
+    let mut out = Vec::new();
+    let mut entry = Entry::default();
+    let result = perform(&cli.request, store, vault, policy, &mut out, &mut entry).await;
+    (result, String::from_utf8_lossy(&out).into_owned(), entry)
+}
+
+fn code(result: &Result<u8, Failure>) -> u8 {
+    match result {
+        Ok(code) => *code,
+        Err(failure) => failure.code(),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn echoed_key_is_redacted_everywhere() {
+    let server =
+        Server::start(|request| reply("200 OK", &format!("X-Echo: {SECRET}\r\n"), request));
+    let url = format!("{}/v1/echo?key={SECRET}", server.origin);
+
+    let (result, out, entry) = run(
+        &["-i", &url],
+        &vault(&server.origin),
+        &Policy::default(),
+        &store("echo"),
+    )
+    .await;
+
+    assert_eq!(code(&result), 0);
+    assert!(server.received().contains(&format!("x-api-key: {SECRET}")));
+    assert!(!out.contains(SECRET), "{out}");
+    assert!(out.contains("x-echo: [apicli:redacted]"), "{out}");
+    assert!(!entry.url.contains(SECRET));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn redirect_to_another_origin_is_not_followed() {
+    let attacker = Server::start(ok);
+    let location = format!("{}/collect", attacker.origin);
+    let api = Server::start(move |_| reply("302 Found", &format!("Location: {location}\r\n"), ""));
+
+    let (result, _, _) = run(
+        &["-L", &format!("{}/v1/download", api.origin)],
+        &vault(&api.origin),
+        &Policy::default(),
+        &store("redirect"),
+    )
+    .await;
+
+    assert_eq!(code(&result), 112);
+    assert_eq!(attacker.count(), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unconfigured_host_receives_nothing() {
+    let api = Server::start(ok);
+    let other = Server::start(ok);
+
+    let (result, _, _) = run(
+        &[&other.origin],
+        &vault(&api.origin),
+        &Policy::default(),
+        &store("unconfigured"),
+    )
+    .await;
+
+    assert_eq!(code(&result), 112);
+    assert_eq!(other.count(), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn writes_reach_the_server_only_through_an_allow_rule() {
+    let api = Server::start(ok);
+    let url = format!("{}/v1/orders/1/notes", api.origin);
+    let args = ["-X", "POST", "--json", "{\"note\":\"x\"}", url.as_str()];
+
+    let (denied, _, _) = run(
+        &args,
+        &vault(&api.origin),
+        &Policy::default(),
+        &store("write-denied"),
+    )
+    .await;
+
+    assert_eq!(code(&denied), 110);
+    assert_eq!(api.count(), 0);
+
+    let rule = Rule {
+        method: "POST".into(),
+        path: "/v1/orders/*/notes".into(),
+        max_body: None,
+        content_type: None,
+        allow_body: false,
+    };
+    let allowed = policy(
+        &api.origin,
+        HostPolicy {
+            allow: vec![rule],
+            ..HostPolicy::default()
+        },
+    );
+    let (result, _, _) = run(
+        &args,
+        &vault(&api.origin),
+        &allowed,
+        &store("write-allowed"),
+    )
+    .await;
+
+    assert_eq!(code(&result), 0);
+    assert_eq!(api.count(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn proxy_environment_is_ignored() {
+    let proxy = Server::start(ok);
+    let api = Server::start(ok);
+    for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "ALL_PROXY"] {
+        unsafe { env::set_var(name, &proxy.origin) };
+    }
+
+    let (result, _, _) = run(
+        &[&api.origin],
+        &vault(&api.origin),
+        &Policy::default(),
+        &store("proxy"),
+    )
+    .await;
+
+    for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "ALL_PROXY"] {
+        unsafe { env::remove_var(name) };
+    }
+    assert_eq!(code(&result), 0);
+    assert_eq!(api.count(), 1);
+    assert_eq!(proxy.count(), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn runaway_loop_is_cut_at_the_rate_limit() {
+    let api = Server::start(ok);
+    let limited = policy(
+        &api.origin,
+        HostPolicy {
+            rate: Some(Rate::parse("3/min").unwrap()),
+            ..HostPolicy::default()
+        },
+    );
+    let store = store("rate");
+    let mut codes = Vec::new();
+
+    for _ in 0..5 {
+        let (result, _, _) = run(&[&api.origin], &vault(&api.origin), &limited, &store).await;
+        codes.push(code(&result));
+    }
+
+    assert_eq!(codes, vec![0, 0, 0, 111, 111]);
+    assert_eq!(api.count(), 3);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn upstream_429_blocks_the_host() {
+    let api = Server::start(|_| reply("429 Too Many Requests", "Retry-After: 60\r\n", "slow down"));
+    let store = store("429");
+
+    let (first, _, _) = run(
+        &[&api.origin],
+        &vault(&api.origin),
+        &Policy::default(),
+        &store,
+    )
+    .await;
+    let (second, _, _) = run(
+        &[&api.origin],
+        &vault(&api.origin),
+        &Policy::default(),
+        &store,
+    )
+    .await;
+
+    assert_eq!(code(&first), 0);
+    assert_eq!(code(&second), 111);
+    assert_eq!(api.count(), 1);
+}

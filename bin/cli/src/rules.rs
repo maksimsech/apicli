@@ -9,7 +9,7 @@ use apicli_core::{HostPolicy, Origin, Policy, READ_METHODS, Rate, Rule, Vault};
 use apicli_vault::Store;
 
 use crate::{
-    admin::authenticate,
+    admin::{authenticate, require_terminal},
     cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand},
     failure::Failure,
 };
@@ -129,6 +129,9 @@ pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
 }
 
 pub fn policy(command: PolicyCommand) -> Result<u8, Failure> {
+    if matches!(command, PolicyCommand::Edit) {
+        require_terminal()?;
+    }
     let store = Store::open()?;
     let mut vault = store.load()?;
     match command {
@@ -152,6 +155,7 @@ pub fn policy(command: PolicyCommand) -> Result<u8, Failure> {
 }
 
 fn open_for_change() -> Result<(Store, Vault, Policy), Failure> {
+    require_terminal()?;
     let store = Store::open()?;
     let mut vault = store.load()?;
     authenticate(&store, &mut vault)?;
