@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "bin/cli",
-    "crates/core",
+    "crates/policy",
     "crates/vault",
 ]
 resolver = "3"
@@ -14,7 +14,7 @@ authors = ["Maksim Sech"]
 repository = "https://github.com/maksimsech/apicli"
 
 [workspace.dependencies]
-apicli-core = { path = "crates/core" }
+apicli-policy = { path = "crates/policy" }
 apicli-vault = { path = "crates/vault" }
 
 base64 = "0.22"

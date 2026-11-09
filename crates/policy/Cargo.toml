@@ -1,5 +1,5 @@
 [package]
-name = "apicli-core"
+name = "apicli-policy"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true

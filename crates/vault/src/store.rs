@@ -8,7 +8,7 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
-use apicli_core::{Bucket, Vault};
+use apicli_policy::{Bucket, Vault};
 use directories::ProjectDirs;
 use thiserror::Error;
 use zeroize::Zeroizing;

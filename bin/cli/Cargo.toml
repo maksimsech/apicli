@@ -10,7 +10,14 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-apicli-core.workspace = true
+bytes = "1.12"
+fallible-iterator = "0.2"
+postgres-protocol = "0.6.12"
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls-platform-verifier = "0.7.1"
+tokio-rustls = { version = "0.26.6", default-features = false }
+unicode-width = "0.2"
+apicli-policy.workspace = true
 apicli-vault.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.6", features = ["derive"] }
@@ -22,7 +29,7 @@ secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
 url.workspace = true
 
 [target.'cfg(unix)'.dependencies]

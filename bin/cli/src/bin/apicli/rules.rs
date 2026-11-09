@@ -8,19 +8,16 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use apicli_core::{Origin, Policy, Rate, Rule, Vault};
+use apicli::{Failure, finish, open_for_change};
+use apicli_policy::{Origin, Policy, Rate, Rule, Vault};
 use apicli_vault::Store;
 
-use crate::{
-    admin::{authenticate, require_terminal},
-    cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand},
-    failure::Failure,
-};
+use crate::cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand};
 
 const DEFAULT_EDITOR: &str = if cfg!(windows) { "notepad" } else { "vi" };
 
 pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
-    let (store, mut vault) = open_for_change()?;
+    let (store, mut vault) = open_for_change("apicli")?;
     let policy = &mut vault.policy;
     let message = match command {
         AllowCommand::Add {
@@ -63,7 +60,7 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
 }
 
 pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
-    let (store, mut vault) = open_for_change()?;
+    let (store, mut vault) = open_for_change("apicli")?;
     let policy = &mut vault.policy;
     let message = match command {
         DenyCommand::Add { host, method, path } => {
@@ -99,7 +96,7 @@ pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
 }
 
 pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
-    let (store, mut vault) = open_for_change()?;
+    let (store, mut vault) = open_for_change("apicli")?;
     let policy = &mut vault.policy;
     let message = match command {
         LimitCommand::Set {
@@ -136,16 +133,6 @@ pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
     finish(&store, &vault, &message)
 }
 
-pub fn log_limit(mb: u32) -> Result<u8, Failure> {
-    let (store, mut vault) = open_for_change()?;
-    vault.policy.log_limit_mb = mb;
-    finish(
-        &store,
-        &vault,
-        &format!("The audit log is now kept under {mb} MB"),
-    )
-}
-
 pub fn policy(command: PolicyCommand) -> Result<u8, Failure> {
     match command {
         PolicyCommand::Show => {
@@ -157,25 +144,11 @@ pub fn policy(command: PolicyCommand) -> Result<u8, Failure> {
             Ok(0)
         }
         PolicyCommand::Edit => {
-            let (store, mut vault) = open_for_change()?;
+            let (store, mut vault) = open_for_change("apicli")?;
             vault.policy = edit(&effective(&vault))?;
             finish(&store, &vault, "Saved the policy")
         }
     }
-}
-
-fn open_for_change() -> Result<(Store, Vault), Failure> {
-    require_terminal()?;
-    let store = Store::open()?;
-    let mut vault = store.load()?;
-    authenticate(&store, &mut vault)?;
-    Ok((store, vault))
-}
-
-fn finish(store: &Store, vault: &Vault, message: &str) -> Result<u8, Failure> {
-    store.save(vault)?;
-    println!("{message}");
-    Ok(0)
 }
 
 fn same(rule: &Rule, method: &str, path: &str) -> bool {

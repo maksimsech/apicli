@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use apicli_core::{Grant, Origin, Rule, authorize};
+use apicli::{Failure, now, print_json};
+use apicli_policy::{Grant, Origin, Rule, authorize};
 use apicli_vault::Store;
 use serde::Serialize;
 
 use crate::{
-    admin::add_hint,
-    failure::Failure,
-    request::{denied, now, parse_url},
+    request::{denied, parse_url},
+    secret::add_hint,
 };
 
 #[derive(Serialize)]
@@ -174,10 +174,4 @@ fn describe(rule: &Rule) -> String {
     } else {
         format!("{rule} ({})", limits.join(", "))
     }
-}
-
-fn print_json(value: &impl Serialize) -> Result<(), Failure> {
-    let text = serde_json::to_string(value).map_err(|error| Failure::Write(error.to_string()))?;
-    println!("{text}");
-    Ok(())
 }

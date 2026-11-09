@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, fmt};
 use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 
-use crate::{Denial, Limits, Origin, READ_METHODS, Rate};
+use super::{Denial, Origin, READ_METHODS};
+use crate::{Limits, Rate};
 
 pub const METHOD_OVERRIDES: [&str; 3] = [
     "x-http-method-override",

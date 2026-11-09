@@ -2,13 +2,13 @@ use std::{
     collections::{BTreeSet, HashSet},
     fs,
     io::{Read, Write, stdin, stdout},
-    thread::sleep,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
-use apicli_core::{
-    Body, Credential, Denial, Grant, Limits, METHOD_OVERRIDES, Origin, Redactor, UNRESERVED, Vault,
-    Wait, authorize,
+use apicli::{Entry, Failure, now, record, take};
+use apicli_policy::{
+    Body, Credential, Denial, Grant, METHOD_OVERRIDES, Origin, Redactor, UNRESERVED, Vault,
+    authorize,
 };
 use apicli_vault::Store;
 use percent_encoding::percent_encode;
@@ -22,7 +22,9 @@ use reqwest::{
 use secrecy::ExposeSecret;
 use url::{ParseError, Url};
 
-use crate::{admin::add_hint, audit, audit::Entry, cli::RequestArgs, failure::Failure, response};
+use crate::{cli::RequestArgs, network::network, response, secret::add_hint};
+
+const MASK: &str = "[apicli:redacted]";
 
 pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
     let store = Store::open()?;
@@ -38,7 +40,7 @@ pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
             entry.error = failure.to_string().lines().next().map(String::from);
         }
     }
-    audit::record(&store, &entry, vault.policy.log_limit_mb);
+    record("apicli", &store, &entry, vault.policy.log_limit_mb);
     result
 }
 
@@ -85,7 +87,7 @@ pub async fn perform(
     apply_custom_headers(&mut headers, &args.headers)?;
     check_overrides(&headers)?;
     let client = client(args)?;
-    let redactor = Redactor::new(vault.secrets());
+    let redactor = Redactor::new(MASK, vault.secrets());
     let started = Instant::now();
     let mut redirects = 0;
     loop {
@@ -103,9 +105,11 @@ pub async fn perform(
             Grant::Default => "default".into(),
             Grant::Rule(rule) => format!("allow {rule}"),
         });
+        let origin = credential.origin.to_string();
         take(
             store,
-            &credential.origin,
+            &origin,
+            &origin,
             &vault.policy.host(&credential.origin).limits(),
             args.wait,
         )?;
@@ -124,7 +128,7 @@ pub async fn perform(
         if let Some(body) = &body {
             request = request.body(body.clone());
         }
-        let response = request.send().await?;
+        let response = request.send().await.map_err(network)?;
         if response.status() == StatusCode::TOO_MANY_REQUESTS {
             let until = now().saturating_add(retry_after(&response));
             store.update_buckets(|buckets| {
@@ -161,39 +165,6 @@ pub async fn perform(
     }
 }
 
-fn take(store: &Store, origin: &Origin, limits: &Limits, wait: Option<f64>) -> Result<(), Failure> {
-    let deadline = wait.map(|seconds| now().saturating_add((seconds.max(0.0) * 1000.0) as u64));
-    loop {
-        let current = now();
-        let result = store.update_buckets(|buckets| {
-            buckets
-                .entry(origin.to_string())
-                .or_default()
-                .take(limits, current)
-        })?;
-        let Err(wait) = result else {
-            return Ok(());
-        };
-        if deadline.is_some_and(|deadline| current.saturating_add(wait.millis()) <= deadline) {
-            sleep(Duration::from_millis(wait.millis()));
-            continue;
-        }
-        let seconds = wait.millis() as f64 / 1000.0;
-        let reason = match wait {
-            Wait::Rate(_) => format!("rate limited on {origin} ({limits}), retry in {seconds:.1}s"),
-            Wait::Daily(_) => format!(
-                "the daily limit for {origin} is used up ({limits}), it resets in {seconds:.0}s"
-            ),
-            Wait::Upstream(_) => {
-                format!("{origin} answered 429 Too Many Requests, retry in {seconds:.0}s")
-            }
-        };
-        return Err(Failure::Limited(format!(
-            "{reason}\nrerun with --wait to wait for it"
-        )));
-    }
-}
-
 fn retry_after(response: &Response) -> u64 {
     response
         .headers()
@@ -201,14 +172,6 @@ fn retry_after(response: &Response) -> u64 {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
         .map_or(60_000, |seconds| seconds.saturating_mul(1000))
-}
-
-pub fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 fn redirect_target(response: &Response) -> Option<Url> {
@@ -470,7 +433,7 @@ fn client(args: &RequestArgs) -> Result<Client, Failure> {
     if let Some(seconds) = args.connect_timeout {
         builder = builder.connect_timeout(duration(seconds, "--connect-timeout")?);
     }
-    Ok(builder.build()?)
+    builder.build().map_err(network)
 }
 
 fn duration(seconds: f64, flag: &str) -> Result<Duration, Failure> {

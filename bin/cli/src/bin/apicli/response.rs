@@ -4,10 +4,11 @@ use std::{
     time::Instant,
 };
 
-use apicli_core::Redactor;
+use apicli::{Entry, Failure};
+use apicli_policy::Redactor;
 use reqwest::{Method, Response, Version, header::CONTENT_TYPE};
 
-use crate::{audit::Entry, cli::RequestArgs, failure::Failure};
+use crate::{cli::RequestArgs, network::network};
 
 pub async fn write(
     mut response: Response,
@@ -49,7 +50,7 @@ pub async fn write(
         if (args.include || args.head) && !quiet {
             out.write_all(&head).map_err(write_failure)?;
         }
-        while let Some(chunk) = response.chunk().await? {
+        while let Some(chunk) = response.chunk().await.map_err(network)? {
             size += chunk.len();
             if !quiet {
                 out.write_all(&redactor.push(&chunk))

@@ -2,24 +2,24 @@ use std::{fs, path::PathBuf};
 
 use directories::BaseDirs;
 
-use crate::{
-    cli::{Agent, SkillCommand},
-    failure::Failure,
-};
+use crate::{Agent, Failure, SkillCommand};
 
-const SKILL: &str = include_str!("../skill/SKILL.md");
-
-pub fn skill(command: SkillCommand) -> Result<u8, Failure> {
+pub fn skill(name: &str, content: &str, command: SkillCommand) -> Result<u8, Failure> {
     match command {
         SkillCommand::Print => {
-            print!("{SKILL}");
+            print!("{content}");
             Ok(0)
         }
-        SkillCommand::Install { agent, path } => install(agent, path),
+        SkillCommand::Install { agent, path } => install(name, content, agent, path),
     }
 }
 
-fn install(agent: Option<Agent>, path: Option<PathBuf>) -> Result<u8, Failure> {
+fn install(
+    name: &str,
+    content: &str,
+    agent: Option<Agent>,
+    path: Option<PathBuf>,
+) -> Result<u8, Failure> {
     let home = BaseDirs::new()
         .map(|dirs| dirs.home_dir().to_path_buf())
         .ok_or_else(|| Failure::Usage("no home directory".into()))?;
@@ -35,10 +35,10 @@ fn install(agent: Option<Agent>, path: Option<PathBuf>) -> Result<u8, Failure> {
             ));
         }
     };
-    let dir = dir.join("apicli");
+    let dir = dir.join(name);
     let file = dir.join("SKILL.md");
     fs::create_dir_all(&dir)
-        .and_then(|_| fs::write(&file, SKILL))
+        .and_then(|_| fs::write(&file, content))
         .map_err(|error| Failure::Write(format!("{}: {error}", file.display())))?;
     println!("Installed {}", file.display());
     Ok(0)

@@ -1,32 +1,25 @@
-mod admin;
-mod audit;
 #[cfg(test)]
 mod bypass;
 mod cli;
-mod failure;
 mod info;
+mod network;
 mod request;
 mod response;
 mod rules;
-mod skill;
+mod secret;
 
 use std::{env, process::ExitCode};
 
-use cli::{Command, LogCommand, parse};
-use failure::Failure;
+use apicli::{Failure, LogCommand, disable_core_dumps, exit, log, log_limit, password, skill};
+use cli::{Command, parse};
+
+const TOOL: &str = "apicli";
+const SKILL: &str = include_str!("../../../skill/apicli/SKILL.md");
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     disable_core_dumps();
-    match run().await {
-        Ok(code) => ExitCode::from(code),
-        Err(failure) => {
-            for line in failure.to_string().lines() {
-                eprintln!("apicli: {line}");
-            }
-            ExitCode::from(failure.code())
-        }
-    }
+    exit(TOOL, run().await)
 }
 
 async fn run() -> Result<u8, Failure> {
@@ -38,8 +31,8 @@ async fn run() -> Result<u8, Failure> {
     match cli.command {
         Some(Command::Hosts { json }) => info::hosts(json),
         Some(Command::Explain { method, url, json }) => info::explain(&method, &url, json),
-        Some(Command::Secret { command }) => admin::secret(command),
-        Some(Command::Password { command }) => admin::password(command),
+        Some(Command::Secret { command }) => secret::secret(command),
+        Some(Command::Password { command }) => password(TOOL, command),
         Some(Command::Allow { command }) => rules::allow(command),
         Some(Command::Deny { command }) => rules::deny(command),
         Some(Command::Policy { command }) => rules::policy(command),
@@ -47,29 +40,13 @@ async fn run() -> Result<u8, Failure> {
         Some(Command::Log {
             command: Some(LogCommand::Limit { mb }),
             ..
-        }) => rules::log_limit(mb),
+        }) => log_limit(TOOL, mb),
         Some(Command::Log {
             command: None,
             tail,
             json,
-        }) => audit::log(tail, json),
-        Some(Command::Skill { command }) => skill::skill(command),
+        }) => log(tail, json),
+        Some(Command::Skill { command }) => skill(TOOL, SKILL, command),
         None => request::send(cli.request).await,
     }
 }
-
-#[cfg(unix)]
-fn disable_core_dumps() {
-    use libc::{RLIMIT_CORE, rlimit, setrlimit};
-
-    let limit = rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    unsafe {
-        setrlimit(RLIMIT_CORE, &limit);
-    }
-}
-
-#[cfg(not(unix))]
-fn disable_core_dumps() {}

@@ -1,6 +1,7 @@
 use url::Url;
 
-use crate::{Body, Credential, Grant, Origin, Rule, Vault};
+use super::{Body, Credential, Grant, Origin, Rule};
+use crate::Vault;
 
 pub const READ_METHODS: [&str; 3] = ["GET", "HEAD", "OPTIONS"];
 

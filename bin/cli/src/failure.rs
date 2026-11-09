@@ -1,5 +1,3 @@
-use std::error::Error as StdError;
-
 use apicli_vault::VaultError;
 use thiserror::Error;
 
@@ -32,6 +30,8 @@ pub enum Failure {
     #[error("request failed: {0}")]
     Network(String),
     #[error("{0}")]
+    Database(String),
+    #[error("{0}")]
     Denied(String),
     #[error("{0}")]
     Limited(String),
@@ -46,7 +46,7 @@ pub enum Failure {
 impl Failure {
     pub fn code(&self) -> u8 {
         match self {
-            Self::Scheme(_) => 1,
+            Self::Scheme(_) | Self::Database(_) => 1,
             Self::Usage(_) | Self::Refused { .. } | Self::NeedsTerminal => 2,
             Self::Url(_) => 3,
             Self::Dns(_) => 6,
@@ -66,12 +66,17 @@ impl Failure {
     }
 
     pub fn outcome(&self) -> &'static str {
-        match self.code() {
-            110 => "denied",
-            111 => "limited",
-            112 => "unconfigured",
-            113 | 114 => "broken",
-            1..=3 => "invalid",
+        match self {
+            Self::Database(_) => "error",
+            Self::Denied(_) => "denied",
+            Self::Limited(_) => "limited",
+            Self::Unconfigured(_) => "unconfigured",
+            Self::Integrity(_) | Self::Setup(_) => "broken",
+            Self::Scheme(_)
+            | Self::Usage(_)
+            | Self::Refused { .. }
+            | Self::NeedsTerminal
+            | Self::Url(_) => "invalid",
             _ => "failed",
         }
     }
@@ -84,42 +89,4 @@ impl From<VaultError> for Failure {
             VaultError::Corrupt(_) | VaultError::Io(_) => Self::Integrity(error.to_string()),
         }
     }
-}
-
-impl From<reqwest::Error> for Failure {
-    fn from(error: reqwest::Error) -> Self {
-        let chain = sources(&error);
-        let text = chain.join(": ");
-        let cause = chain.last().cloned().unwrap_or_else(|| error.to_string());
-        if error.is_timeout() {
-            Self::Timeout
-        } else if error.is_connect() && text.contains("dns error") {
-            Self::Dns(cause)
-        } else if error.is_connect()
-            && [
-                "certificate",
-                "alert",
-                "peer is incompatible",
-                "peer misbehaved",
-            ]
-            .iter()
-            .any(|word| text.contains(word))
-        {
-            Self::Tls(cause)
-        } else if error.is_connect() {
-            Self::Connect(cause)
-        } else {
-            Self::Network(cause)
-        }
-    }
-}
-
-fn sources(error: &dyn StdError) -> Vec<String> {
-    let mut chain = Vec::new();
-    let mut source = error.source();
-    while let Some(error) = source {
-        chain.push(error.to_string());
-        source = error.source();
-    }
-    chain
 }

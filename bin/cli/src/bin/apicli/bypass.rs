@@ -7,11 +7,12 @@ use std::{
     thread,
 };
 
-use apicli_core::{Credential, HostPolicy, Origin, Rate, Rule, Vault};
+use apicli::{Entry, Failure};
+use apicli_policy::{Credential, HostPolicy, Origin, Rate, Rule, Vault};
 use apicli_vault::Store;
 use secrecy::SecretString;
 
-use crate::{audit::Entry, cli::parse, failure::Failure, request::perform};
+use crate::{cli::parse, request::perform};
 
 const SECRET: &str = "sk-test-1234567890";
 const REPORTS_SECRET: &str = "tok-reports-0987654321";
