@@ -1,4 +1,6 @@
-use apicli_core::{Grant, Rule, authorize};
+use std::collections::BTreeMap;
+
+use apicli_core::{Grant, Origin, Rule, authorize};
 use apicli_vault::Store;
 use serde::Serialize;
 
@@ -11,14 +13,21 @@ use crate::{
 #[derive(Serialize)]
 struct Host {
     host: String,
-    credential: String,
-    header: String,
+    credentials: Vec<Secret>,
     methods: Vec<String>,
     allow: Vec<String>,
     deny: Vec<String>,
     limit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     remaining: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct Secret {
+    name: String,
+    header: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    paths: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -39,21 +48,27 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
     let vault = store.load()?;
     let buckets = store.read_buckets();
     let now = now();
-    let hosts = vault
-        .credentials
-        .iter()
-        .map(|credential| {
-            let rules = vault.policy.host(&credential.origin);
+    let mut origins = BTreeMap::<&Origin, Vec<Secret>>::new();
+    for credential in &vault.credentials {
+        origins.entry(&credential.origin).or_default().push(Secret {
+            name: credential.name.clone(),
+            header: credential.header.clone(),
+            paths: credential.paths.clone(),
+        });
+    }
+    let hosts = origins
+        .into_iter()
+        .map(|(origin, credentials)| {
+            let rules = vault.policy.host(origin);
             Host {
-                host: credential.origin.to_string(),
-                credential: credential.name.clone(),
-                header: credential.header.clone(),
+                host: origin.to_string(),
+                credentials,
                 methods: rules.methods.clone(),
                 allow: rules.allow.iter().map(describe).collect(),
                 deny: rules.deny.iter().map(Rule::to_string).collect(),
                 limit: rules.limits().to_string(),
                 remaining: buckets
-                    .get(&credential.origin.to_string())
+                    .get(&origin.to_string())
                     .cloned()
                     .unwrap_or_default()
                     .remaining(&rules.limits(), now),
@@ -70,7 +85,18 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
     } else {
         for host in hosts {
             println!("{}", host.host);
-            println!("  credential: {} ({})", host.credential, host.header);
+            for secret in host.credentials {
+                if secret.paths.is_empty() {
+                    println!("  credential: {} ({})", secret.name, secret.header);
+                } else {
+                    println!(
+                        "  credential: {} ({}) on {}",
+                        secret.name,
+                        secret.header,
+                        secret.paths.join(", ")
+                    );
+                }
+            }
             println!("  allowed: {}", host.methods.join(", "));
             for rule in host.allow {
                 println!("  allow: {rule}");

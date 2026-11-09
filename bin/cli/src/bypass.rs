@@ -14,6 +14,7 @@ use secrecy::SecretString;
 use crate::{audit::Entry, cli::parse, failure::Failure, request::perform};
 
 const SECRET: &str = "sk-test-1234567890";
+const REPORTS_SECRET: &str = "tok-reports-0987654321";
 
 struct Server {
     origin: String,
@@ -97,6 +98,7 @@ fn vault_with(origin: &str, host: HostPolicy) -> Vault {
         credentials: vec![Credential {
             name: "test".into(),
             origin: Origin::parse(origin).unwrap(),
+            paths: Vec::new(),
             header: "X-Api-Key".into(),
             template: "{secret}".into(),
             secret: SecretString::from(SECRET),
@@ -107,6 +109,19 @@ fn vault_with(origin: &str, host: HostPolicy) -> Vault {
         .policy
         .hosts
         .insert(Origin::parse(origin).unwrap(), host);
+    vault
+}
+
+fn mixed(origin: &str) -> Vault {
+    let mut vault = vault(origin);
+    vault.credentials.push(Credential {
+        name: "reports".into(),
+        origin: Origin::parse(origin).unwrap(),
+        paths: vec!["/v1/reports/**".into()],
+        header: "Authorization".into(),
+        template: "Bearer {secret}".into(),
+        secret: SecretString::from(REPORTS_SECRET),
+    });
     vault
 }
 
@@ -252,6 +267,43 @@ async fn agent_cannot_set_the_credential_header() {
         &["-H", "x-api-key: guessed", &api.origin],
         &vault(&api.origin),
         &store("credential-header"),
+    )
+    .await;
+
+    assert_eq!(code(&result), 2);
+    assert_eq!(api.count(), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn path_scoped_key_is_sent_only_on_its_paths() {
+    let api = Server::start(ok);
+    let vault = mixed(&api.origin);
+    let store = store("scoped");
+
+    let (users, _, _) = run(&[&format!("{}/v1/users", api.origin)], &vault, &store).await;
+    let (reports, _, _) = run(&[&format!("{}/v1/reports/1", api.origin)], &vault, &store).await;
+
+    assert_eq!(code(&users), 0);
+    assert_eq!(code(&reports), 0);
+    let requests = api.requests.lock().unwrap().clone();
+    assert!(requests[0].contains(SECRET));
+    assert!(!requests[0].contains(REPORTS_SECRET));
+    assert!(requests[1].contains(&format!("Bearer {REPORTS_SECRET}")));
+    assert!(!requests[1].contains(SECRET));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn agent_cannot_set_another_credential_header_of_the_host() {
+    let api = Server::start(ok);
+
+    let (result, _, _) = run(
+        &[
+            "-H",
+            "authorization: Bearer guessed",
+            &format!("{}/v1/users", api.origin),
+        ],
+        &mixed(&api.origin),
+        &store("other-credential-header"),
     )
     .await;
 

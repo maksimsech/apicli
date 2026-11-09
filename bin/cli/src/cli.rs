@@ -99,6 +99,12 @@ pub enum SecretCommand {
         host: String,
         #[arg(long, help = "Header template, like 'Authorization: Bearer {secret}'")]
         header: String,
+        #[arg(
+            long = "path",
+            value_name = "PATH",
+            help = "Send it only on paths matching PATH, like '/v1/reports/**'. Repeat for more paths"
+        )]
+        paths: Vec<String>,
     },
     #[command(about = "Replace a stored secret")]
     Rotate { name: String },

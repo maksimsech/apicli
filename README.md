@@ -22,6 +22,15 @@ apicli skill install --agent claude  # or codex, opencode, or --path DIR
 
 You type the secret at a prompt. It never goes on the command line.
 
+If some endpoints take a different credential, add it for those paths only:
+
+```sh
+apicli secret add example     --host api.example.com --header 'Authorization: Bearer {secret}'
+apicli secret add example-key --host api.example.com --path '/v1/reports/**' --header 'X-API-Key: {secret}'
+```
+
+A request gets the first secret whose `--path` matches, or the host's secret without `--path`. Each redirect is matched again. `apicli explain GET URL` shows which secret a request gets.
+
 ## Use
 
 ```sh

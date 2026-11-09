@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     fs,
     io::{Read, Write, stdin, stdout},
     thread::sleep,
@@ -109,7 +109,7 @@ pub async fn perform(
             &vault.policy.host(&credential.origin).limits(),
             args.wait,
         )?;
-        let request_headers = with_credential(&headers, credential)?;
+        let request_headers = with_credential(&headers, credential, vault)?;
         if args.verbose {
             for line in request_lines(&method, &url, &request_headers) {
                 eprintln!(
@@ -244,11 +244,17 @@ pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault) -> Failure
                 "denied: {method} {path} on {origin}\nallowed here: {allowed}\nto allow it, the user can run: apicli allow add {origin} {method} '{path}'"
             ))
         }
+        Denial::Uncovered => Failure::Unconfigured(format!(
+            "no secret on {origin} covers {path}\nto add one, the user can run: {} --path '{path}'",
+            add_hint(&origin)
+        )),
         Denial::Unconfigured(origin) => {
             let configured = vault
                 .credentials
                 .iter()
                 .map(|credential| credential.origin.to_string())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .collect::<Vec<_>>();
             let known = if configured.is_empty() {
                 "no hosts are configured yet".to_string()
@@ -275,23 +281,35 @@ fn check_overrides(headers: &HeaderMap) -> Result<(), Failure> {
     }
 }
 
-fn with_credential(headers: &HeaderMap, credential: &Credential) -> Result<HeaderMap, Failure> {
-    let name = HeaderName::from_bytes(credential.header.as_bytes()).map_err(|_| {
-        Failure::Integrity(format!("{} has an invalid header name", credential.name))
-    })?;
-    if headers.contains_key(&name) {
-        return Err(Failure::Usage(format!(
-            "{} is added by apicli for {}, remove -H {}",
-            credential.header, credential.origin, credential.header
-        )));
+fn with_credential(
+    headers: &HeaderMap,
+    credential: &Credential,
+    vault: &Vault,
+) -> Result<HeaderMap, Failure> {
+    for added in vault
+        .credentials
+        .iter()
+        .filter(|added| added.origin == credential.origin)
+    {
+        if headers.contains_key(header_name(added)?) {
+            return Err(Failure::Usage(format!(
+                "{} is added by apicli for {}, remove -H {}",
+                added.header, added.origin, added.header
+            )));
+        }
     }
     let mut value = HeaderValue::from_str(credential.value().expose_secret()).map_err(|_| {
         Failure::Integrity(format!("{} has an invalid header value", credential.name))
     })?;
     value.set_sensitive(true);
     let mut headers = headers.clone();
-    headers.insert(name, value);
+    headers.insert(header_name(credential)?, value);
     Ok(headers)
+}
+
+fn header_name(credential: &Credential) -> Result<HeaderName, Failure> {
+    HeaderName::from_bytes(credential.header.as_bytes())
+        .map_err(|_| Failure::Integrity(format!("{} has an invalid header name", credential.name)))
 }
 
 fn request_lines(method: &Method, url: &Url, headers: &HeaderMap) -> Vec<String> {

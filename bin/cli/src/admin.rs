@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use apicli_core::{Admin, Credential, Origin, Vault};
+use apicli_core::{Admin, Credential, Origin, Vault, validate_path};
 use apicli_vault::{Store, hash_password, verify_password};
 use reqwest::header::{HeaderName, HeaderValue};
 use rpassword::prompt_password;
@@ -25,33 +25,48 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
     let mut vault = store.load()?;
     authenticate(&store, &mut vault)?;
     let message = match command {
-        SecretCommand::Add { name, host, header } => {
+        SecretCommand::Add {
+            name,
+            host,
+            header,
+            paths,
+        } => {
             let origin = Origin::parse(&host).map_err(Failure::Usage)?;
             let (header, template) = parse_template(&header)?;
+            for path in &paths {
+                validate_path(path).map_err(Failure::Usage)?;
+            }
             if vault.find(&name).is_some() {
                 return Err(Failure::Usage(format!(
                     "{name} already exists, use apicli secret rotate {name}"
                 )));
             }
-            if let Some(existing) = vault
-                .credentials
-                .iter()
-                .find(|credential| credential.origin == origin)
+            if paths.is_empty()
+                && let Some(existing) = vault
+                    .credentials
+                    .iter()
+                    .find(|credential| credential.origin == origin && credential.paths.is_empty())
             {
                 return Err(Failure::Usage(format!(
-                    "{origin} already uses {}",
+                    "{origin} already uses {} for every path, add --path to use this one on some paths only",
                     existing.name
                 )));
             }
             let secret = prompt_secret(&name, &template)?;
+            let scope = if paths.is_empty() {
+                String::new()
+            } else {
+                format!(" on {}", paths.join(", "))
+            };
             vault.credentials.push(Credential {
                 name: name.clone(),
                 origin: origin.clone(),
+                paths,
                 header,
                 template,
                 secret,
             });
-            format!("Added {name} for {origin}")
+            format!("Added {name} for {origin}{scope}")
         }
         SecretCommand::Rotate { name } => {
             let credential = vault.find_mut(&name).ok_or_else(|| unknown(&name))?;

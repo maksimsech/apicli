@@ -10,6 +10,7 @@ pub enum Denial {
     EncodedSeparator,
     MethodOverride(String),
     Unconfigured(String),
+    Uncovered,
     Rule(Rule),
     NotAllowed,
     Body(String),
@@ -35,12 +36,17 @@ pub fn authorize<'a>(
         return Err(Denial::MethodOverride("_method".into()));
     }
     let origin = Origin::of(url).ok_or_else(|| Denial::Unconfigured(url.to_string()))?;
-    let credential = vault
+    if !vault
         .credentials
         .iter()
-        .find(|credential| credential.origin == origin)
-        .ok_or_else(|| Denial::Unconfigured(origin.to_string()))?;
+        .any(|credential| credential.origin == origin)
+    {
+        return Err(Denial::Unconfigured(origin.to_string()));
+    }
     let grant = vault.policy.host(&origin).check(method, url.path(), body)?;
+    let credential = vault
+        .credential(&origin, url.path())
+        .ok_or(Denial::Uncovered)?;
     Ok((credential, grant))
 }
 
@@ -50,15 +56,20 @@ mod tests {
 
     use super::*;
 
+    fn credential(name: &str, paths: &[&str]) -> Credential {
+        Credential {
+            name: name.into(),
+            origin: Origin::parse("api.example.com").unwrap(),
+            paths: paths.iter().map(|path| path.to_string()).collect(),
+            header: "X-API-Key".into(),
+            template: "{secret}".into(),
+            secret: SecretString::from("key-1234567890"),
+        }
+    }
+
     fn vault() -> Vault {
         Vault {
-            credentials: vec![Credential {
-                name: "example".into(),
-                origin: Origin::parse("api.example.com").unwrap(),
-                header: "X-API-Key".into(),
-                template: "{secret}".into(),
-                secret: SecretString::from("key-1234567890"),
-            }],
+            credentials: vec![credential("example", &[])],
             ..Vault::default()
         }
     }
@@ -74,6 +85,53 @@ mod tests {
         assert_eq!(
             check("https://api.example.com/v1/users", "GET"),
             Ok("example".into())
+        );
+    }
+
+    #[test]
+    fn path_scoped_credentials_cover_only_their_paths() {
+        let mut vault = Vault {
+            credentials: vec![
+                credential("reports", &["/v1/reports/**"]),
+                credential("export", &["/v1/exports/*"]),
+            ],
+            ..Vault::default()
+        };
+        let pick = |vault: &Vault, url: &str| {
+            authorize(&Url::parse(url).unwrap(), "GET", None, vault)
+                .map(|(credential, _)| credential.name.clone())
+        };
+
+        assert_eq!(
+            pick(&vault, "https://api.example.com/v1/reports/1/rows"),
+            Ok("reports".into())
+        );
+        assert_eq!(
+            pick(&vault, "https://api.example.com/v1/exports/7"),
+            Ok("export".into())
+        );
+        assert_eq!(
+            pick(&vault, "https://api.example.com/V1/reports/1"),
+            Err(Denial::Uncovered)
+        );
+        assert_eq!(
+            pick(&vault, "https://api.example.com/v1/exports/7/file"),
+            Err(Denial::Uncovered)
+        );
+
+        vault.credentials.push(credential("main", &[]));
+
+        assert_eq!(
+            pick(&vault, "https://api.example.com/v1/reports"),
+            Ok("reports".into())
+        );
+        assert_eq!(
+            pick(&vault, "https://api.example.com/v1/users"),
+            Ok("main".into())
+        );
+        assert_eq!(
+            pick(&vault, "https://api.example.com/v1//reports/1"),
+            Ok("main".into())
         );
     }
 

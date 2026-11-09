@@ -163,14 +163,7 @@ impl HostPolicy {
 impl Rule {
     pub fn validate(&self) -> Result<(), String> {
         validate_method(&self.method)?;
-        let Some(rest) = self.path.strip_prefix('/') else {
-            return Err(format!("{self}: the path must start with /"));
-        };
-        let parts = rest.split('/').collect::<Vec<_>>();
-        if parts.iter().take(parts.len() - 1).any(|part| *part == "**") {
-            return Err(format!("{self}: ** must be the last segment"));
-        }
-        Ok(())
+        validate_path(&self.path).map_err(|error| format!("{} {error}", self.method))
     }
 
     fn body_problem(&self, read: bool, body: Option<&Body>) -> Option<String> {
@@ -213,7 +206,18 @@ fn validate_method(method: &str) -> Result<(), String> {
     }
 }
 
-fn matches(pattern: &str, path: &str, loose: bool) -> bool {
+pub fn validate_path(path: &str) -> Result<(), String> {
+    let Some(rest) = path.strip_prefix('/') else {
+        return Err(format!("{path}: the path must start with /"));
+    };
+    let parts = rest.split('/').collect::<Vec<_>>();
+    if parts.iter().take(parts.len() - 1).any(|part| *part == "**") {
+        return Err(format!("{path}: ** must be the last segment"));
+    }
+    Ok(())
+}
+
+pub fn matches(pattern: &str, path: &str, loose: bool) -> bool {
     let pattern = segments(pattern, loose);
     let path = segments(path, loose);
     for (index, part) in pattern.iter().enumerate() {
