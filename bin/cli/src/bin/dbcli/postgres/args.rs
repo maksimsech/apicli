@@ -2,7 +2,7 @@ use apicli::{Failure, Refused};
 use clap::{ColorChoice, Parser};
 
 use super::output::{Format, Options};
-use crate::call::{Common, engine_args};
+use crate::shared::{Common, engine_args};
 
 #[derive(Debug, Parser)]
 #[command(

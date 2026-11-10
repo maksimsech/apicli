@@ -14,10 +14,8 @@ use secrecy::ExposeSecret;
 use url::Url;
 
 use super::args::{ClientArgs, parse};
-use crate::{
-    call::{Context, mode, read_only, writes},
-    secret::rotate_hint,
-    split::{Dialect, Statement, split, tokens, word},
+use crate::shared::{
+    Context, Dialect, Statement, mode, read_only, rotate_hint, split, tokens, word, writes,
 };
 
 const READONLY: &str = "164";

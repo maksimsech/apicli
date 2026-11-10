@@ -8,7 +8,7 @@ use super::{
     client::Client,
     reply::{Mode, Reply, format, lossy, repr},
 };
-use crate::call::{Context, not_allowed, quote};
+use crate::shared::{Context, not_allowed, quote};
 
 const READS: [&str; 2] = ["PING", "INFO"];
 

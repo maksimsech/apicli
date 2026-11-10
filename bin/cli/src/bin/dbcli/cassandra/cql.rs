@@ -1,10 +1,7 @@
 use apicli::Failure;
 use apicli_policy::Connection;
 
-use crate::{
-    call::{not_allowed, quote},
-    split::{Dialect, Statement, Token, split, tokens, word},
-};
+use crate::shared::{Dialect, Statement, Token, not_allowed, quote, split, tokens, word};
 
 const LOCAL_FILES: &str = "it reads or writes local files";
 const WRITES: [&str; 10] = [

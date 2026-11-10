@@ -1,10 +1,8 @@
 use apicli::{Failure, finish, open_for_change};
 use apicli_policy::Rate;
 
-use crate::{
-    cli::{AllowCommand, LimitCommand},
-    secret::unknown,
-};
+use super::secret::unknown;
+use crate::cli::{AllowCommand, LimitCommand};
 
 pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("dbcli")?;

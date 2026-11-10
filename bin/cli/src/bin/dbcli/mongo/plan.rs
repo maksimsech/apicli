@@ -8,7 +8,7 @@ use super::{
     inspect::js_number,
     parse::{Segment, Statement},
 };
-use crate::call::not_allowed;
+use crate::shared::not_allowed;
 
 const READS: [&str; 9] = [
     "find",

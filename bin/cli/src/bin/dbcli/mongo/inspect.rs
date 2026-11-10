@@ -2,7 +2,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::DateTime;
 use mongodb::bson::{Binary, Bson, Document, Regex, spec::BinarySubtype};
 
-use crate::call::{hex, uuid};
+use crate::shared::{hex, uuid};
 
 const BREAK: usize = 80;
 const COMPACT: usize = 3;

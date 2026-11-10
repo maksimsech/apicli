@@ -4,7 +4,7 @@ use apicli::Failure;
 use chrono::{DateTime, Duration, NaiveDate};
 use unicode_width::UnicodeWidthStr;
 
-use crate::call::{hex, uuid};
+use crate::shared::{hex, uuid};
 
 const PRECISION: i32 = 5;
 

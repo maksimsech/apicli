@@ -10,10 +10,7 @@ use tokio::{
 };
 
 use super::reply::{Parser, Reply, lossy};
-use crate::{
-    secret::rotate_hint,
-    tls::{Io, dial, lost, secure},
-};
+use crate::shared::{Io, dial, lost, rotate_hint, secure};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 

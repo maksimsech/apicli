@@ -16,10 +16,7 @@ use super::{
     parse::parse,
     plan::{Bulked, Plan, Shape, Step, check, plan},
 };
-use crate::{
-    call::{Context, summary},
-    secret::rotate_hint,
-};
+use crate::shared::{Context, rotate_hint, summary};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const BATCH: usize = 20;

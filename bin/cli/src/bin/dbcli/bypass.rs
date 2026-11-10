@@ -13,7 +13,7 @@ use percent_encoding::percent_decode_str;
 use secrecy::SecretString;
 use url::Url;
 
-use crate::call::{Context, perform};
+use crate::{call::perform, shared::Context};
 
 struct Server {
     url: ConnectionUrl,

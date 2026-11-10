@@ -7,7 +7,7 @@ use super::{
     meta::{self, Meta},
     output::{Options, Table, render},
 };
-use crate::call::{Context, mode, read_only, writes};
+use crate::shared::{Context, mode, read_only, writes};
 
 const TAGGED: [&str; 4] = ["INSERT", "UPDATE", "DELETE", "MERGE"];
 

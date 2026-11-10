@@ -4,8 +4,8 @@ use apicli_vault::Store;
 use serde::Serialize;
 
 use crate::{
-    call::{self, describe, find, key, mode, redactor, scrub},
-    secret::add_hint,
+    call::{self, find, scrub},
+    shared::{add_hint, describe, key, mode, redactor},
 };
 
 #[derive(Serialize)]

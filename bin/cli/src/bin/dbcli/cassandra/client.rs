@@ -10,10 +10,7 @@ use tokio::{
 };
 
 use super::value::{Kind, Reader};
-use crate::{
-    secret::rotate_hint,
-    tls::{Io, dial, lost, secure},
-};
+use crate::shared::{Io, dial, lost, rotate_hint, secure};
 
 const VERSION: u8 = 0x04;
 const PAGE: i32 = 5000;

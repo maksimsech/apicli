@@ -4,20 +4,6 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::cli::{SecretCommand, reserved};
 
-pub fn add_hint(name: &str) -> String {
-    format!(
-        "dbcli secret add {name} --url 'postgres://USER@HOST:5432/DATABASE' (or a redis://, mongodb://, cassandra:// or clickhouse:// URL)"
-    )
-}
-
-pub fn rotate_hint(name: &str) -> String {
-    format!("if the password changed, the user can run: dbcli secret rotate {name}")
-}
-
-pub fn write_hint(name: &str) -> String {
-    format!("to allow writes, the user can run: dbcli allow add {name} write")
-}
-
 pub fn unknown(name: &str) -> Failure {
     Failure::Usage(format!(
         "no connection named {name}, run dbcli connections to list them"

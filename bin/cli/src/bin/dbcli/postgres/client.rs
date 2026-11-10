@@ -23,10 +23,7 @@ use tokio::{
 use unicode_width::UnicodeWidthStr;
 
 use super::output::Column;
-use crate::{
-    secret::rotate_hint,
-    tls::{Io, dial, lost, secure},
-};
+use crate::shared::{Io, dial, lost, rotate_hint, secure};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STATEMENT_TIMEOUT: &str = "60s";

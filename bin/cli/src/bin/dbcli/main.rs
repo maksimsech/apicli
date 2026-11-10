@@ -4,19 +4,17 @@ mod call;
 mod cassandra;
 mod cli;
 mod clickhouse;
-mod info;
+mod commands;
 mod mongo;
 mod postgres;
 mod redis;
-mod rules;
-mod secret;
-mod split;
-mod tls;
+mod shared;
 
 use std::{env, process::ExitCode};
 
 use apicli::{Failure, LogCommand, disable_core_dumps, exit, log, log_limit, password, skill};
 use cli::{Command, parse};
+use commands::{allow, connections, explain, limit, secret};
 
 const TOOL: &str = "dbcli";
 const SKILL: &str = include_str!("../../../skill/dbcli/SKILL.md");
@@ -30,11 +28,11 @@ async fn main() -> ExitCode {
 async fn run() -> Result<u8, Failure> {
     let cli = parse(env::args().collect())?;
     match cli.command {
-        Some(Command::Connections { json }) => info::connections(json),
-        Some(Command::Explain { json, name, args }) => info::explain(&name, &args, json).await,
-        Some(Command::Secret { command }) => secret::secret(command),
-        Some(Command::Allow { command }) => rules::allow(command),
-        Some(Command::Limit { command }) => rules::limit(command),
+        Some(Command::Connections { json }) => connections(json),
+        Some(Command::Explain { json, name, args }) => explain(&name, &args, json).await,
+        Some(Command::Secret { command }) => secret(command),
+        Some(Command::Allow { command }) => allow(command),
+        Some(Command::Limit { command }) => limit(command),
         Some(Command::Log {
             command: Some(LogCommand::Limit { mb }),
             ..
