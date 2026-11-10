@@ -120,19 +120,37 @@ impl Connection {
 }
 
 pub fn glob(pattern: &[u8], text: &[u8]) -> bool {
-    let Some((first, rest)) = pattern.split_first() else {
-        return text.is_empty();
-    };
+    let (mut p, mut t) = (0, 0);
+    let mut star = None;
+    while t < text.len() {
+        if pattern.get(p) == Some(&b'*') {
+            star = Some((p, t));
+            p += 1;
+        } else if let Some(width) = single(&pattern[p..], text[t]) {
+            p += width;
+            t += 1;
+        } else if let Some((star_p, star_t)) = star {
+            p = star_p + 1;
+            t = star_t + 1;
+            star = Some((star_p, t));
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|byte| *byte == b'*')
+}
+
+fn single(pattern: &[u8], byte: u8) -> Option<usize> {
+    let (first, rest) = pattern.split_first()?;
     match first {
-        b'*' => (0..=text.len()).any(|skip| glob(rest, &text[skip..])),
-        b'?' => !text.is_empty() && glob(rest, &text[1..]),
-        b'[' => match class(rest, text.first().copied()) {
-            Some((true, after)) => glob(after, &text[1..]),
-            Some((false, _)) => false,
-            None => text.first() == Some(&b'[') && glob(rest, &text[1..]),
+        b'?' => Some(1),
+        b'[' => match class(rest, Some(byte)) {
+            Some((true, after)) => Some(pattern.len() - after.len()),
+            Some((false, _)) => None,
+            None => (byte == b'[').then_some(1),
         },
-        b'\\' if !rest.is_empty() => text.first() == Some(&rest[0]) && glob(&rest[1..], &text[1..]),
-        byte => text.first() == Some(byte) && glob(rest, &text[1..]),
+        b'\\' if !rest.is_empty() => (rest[0] == byte).then_some(2),
+        _ => (*first == byte).then_some(1),
     }
 }
 

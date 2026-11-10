@@ -1,7 +1,7 @@
 use apicli::{Failure, Refused};
-use clap::{ArgAction, ColorChoice, Parser};
+use clap::{ColorChoice, Parser};
 
-use crate::call::engine_args;
+use crate::call::{Common, engine_args};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -41,58 +41,35 @@ pub struct CqlshArgs {
     pub no_color: bool,
     #[arg(short = 'C', long = "color", hide = true)]
     pub color: bool,
-    #[arg(
-        long,
-        value_name = "SECONDS",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "30",
-        help = "Wait up to SECONDS (default 30) for the rate limit instead of failing"
-    )]
-    pub wait: Option<f64>,
     #[arg(hide = true)]
     pub extra: Vec<String>,
-    #[arg(long, action = ArgAction::Help, help = "Print help")]
-    help: Option<bool>,
+    #[command(flatten)]
+    pub common: Common,
 }
 
 const AUTH: &str = "the connection name picks the user and dbcli sends the stored password";
 
-const fn refused(
-    short: Option<char>,
-    long: &'static str,
-    value: bool,
-    reason: &'static str,
-) -> Refused {
-    Refused {
-        short,
-        long,
-        value,
-        reason,
-    }
-}
-
-pub const REFUSED: &[Refused] = &[
-    refused(Some('u'), "username", true, AUTH),
-    refused(Some('p'), "password", true, AUTH),
-    refused(None, "ssl", false, "the connection URL sets TLS"),
-    refused(None, "cqlshrc", true, "dbcli reads no cqlshrc"),
-    refused(None, "credentials", true, AUTH),
-    refused(
+const REFUSED: &[Refused] = &[
+    Refused::new(Some('u'), "username", true, AUTH),
+    Refused::new(Some('p'), "password", true, AUTH),
+    Refused::new(None, "ssl", false, "the connection URL sets TLS"),
+    Refused::new(None, "cqlshrc", true, "dbcli reads no cqlshrc"),
+    Refused::new(None, "credentials", true, AUTH),
+    Refused::new(
         Some('f'),
         "file",
         true,
         "scripts are not supported, pass statements with -e",
     ),
-    refused(
+    Refused::new(
         Some('b'),
         "secure-connect-bundle",
         true,
         "the connection URL picks the server",
     ),
-    refused(None, "cqlversion", true, "dbcli picks the protocol"),
-    refused(None, "protocol-version", true, "dbcli picks the protocol"),
-    refused(
+    Refused::new(None, "cqlversion", true, "dbcli picks the protocol"),
+    Refused::new(None, "protocol-version", true, "dbcli picks the protocol"),
+    Refused::new(
         Some('t'),
         "tty",
         false,

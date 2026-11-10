@@ -1,7 +1,7 @@
 use apicli::{Failure, Refused};
-use clap::{ArgAction, ColorChoice, Parser};
+use clap::{ColorChoice, Parser};
 
-use crate::call::engine_args;
+use crate::call::{Common, engine_args};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -35,73 +35,50 @@ pub struct ClientArgs {
     pub multiline: bool,
     #[arg(short = 'n', long, hide = true)]
     pub multiquery: bool,
-    #[arg(
-        long,
-        value_name = "SECONDS",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "30",
-        help = "Wait up to SECONDS (default 30) for the rate limit instead of failing"
-    )]
-    pub wait: Option<f64>,
     #[arg(hide = true)]
     pub extra: Vec<String>,
-    #[arg(long, action = ArgAction::Help, help = "Print help")]
-    help: Option<bool>,
+    #[command(flatten)]
+    pub common: Common,
 }
 
 const SERVER: &str = "the connection name picks the server";
 const AUTH: &str = "the connection name picks the user and dbcli sends the stored password";
 
-const fn refused(
-    short: Option<char>,
-    long: &'static str,
-    value: bool,
-    reason: &'static str,
-) -> Refused {
-    Refused {
-        short,
-        long,
-        value,
-        reason,
-    }
-}
-
-pub const REFUSED: &[Refused] = &[
-    refused(Some('h'), "host", true, SERVER),
-    refused(None, "port", true, SERVER),
-    refused(None, "connection", true, SERVER),
-    refused(Some('u'), "user", true, AUTH),
-    refused(None, "password", true, AUTH),
-    refused(None, "ask-password", false, AUTH),
-    refused(None, "jwt", true, AUTH),
-    refused(None, "ssh-key-file", true, AUTH),
-    refused(Some('s'), "secure", false, "the connection URL sets TLS"),
-    refused(
+const REFUSED: &[Refused] = &[
+    Refused::new(Some('h'), "host", true, SERVER),
+    Refused::new(None, "port", true, SERVER),
+    Refused::new(None, "connection", true, SERVER),
+    Refused::new(Some('u'), "user", true, AUTH),
+    Refused::new(None, "password", true, AUTH),
+    Refused::new(None, "ask-password", false, AUTH),
+    Refused::new(None, "jwt", true, AUTH),
+    Refused::new(None, "ssh-key-file", true, AUTH),
+    Refused::new(Some('s'), "secure", false, "the connection URL sets TLS"),
+    Refused::new(
         None,
         "accept-invalid-certificate",
         false,
         "the connection URL sets TLS",
     ),
-    refused(
+    Refused::new(
         Some('C'),
         "config-file",
         true,
         "dbcli reads no client config",
     ),
-    refused(
+    Refused::new(
         Some('d'),
         "database",
         true,
         "the connection name picks the database, qualify tables as db.table instead",
     ),
-    refused(
+    Refused::new(
         None,
         "queries-file",
         true,
         "scripts are not supported, pass SQL with -q",
     ),
-    refused(
+    Refused::new(
         Some('i'),
         "interactive",
         false,

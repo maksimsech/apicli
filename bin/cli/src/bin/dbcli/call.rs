@@ -7,11 +7,29 @@ use std::{
 use apicli::{Entry, Failure, Refused, record, take, usage};
 use apicli_policy::{Connection, Engine, Redactor, Vault};
 use apicli_vault::Store;
-use clap::{Parser, parser::ValueSource};
+use clap::{ArgAction, Args, Parser, parser::ValueSource};
 
-use crate::{cassandra, clickhouse, mongo, postgres, redis, secret::add_hint};
+use crate::{
+    cassandra, clickhouse, mongo, postgres, redis,
+    secret::{add_hint, write_hint},
+};
 
 const MASK: &str = "[dbcli:redacted]";
+
+#[derive(Debug, Args)]
+pub struct Common {
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "30",
+        help = "Wait up to SECONDS (default 30) for the rate limit instead of failing"
+    )]
+    pub wait: Option<f64>,
+    #[arg(long, action = ArgAction::Help, help = "Print help")]
+    help: Option<bool>,
+}
 
 pub struct Context<'a> {
     pub store: &'a Store,
@@ -52,21 +70,15 @@ impl<'a> Context<'a> {
     }
 
     pub fn print(&mut self, bytes: &[u8]) -> Result<(), Failure> {
-        self.out
-            .write_all(&self.redactor.redact(bytes))
-            .and_then(|_| self.out.flush())
-            .map_err(|error| Failure::Write(error.to_string()))
+        emit(self.out, &self.redactor, bytes)
     }
 
     pub fn warn(&mut self, bytes: &[u8]) -> Result<(), Failure> {
-        self.err
-            .write_all(&self.redactor.redact(bytes))
-            .and_then(|_| self.err.flush())
-            .map_err(|error| Failure::Write(error.to_string()))
+        emit(self.err, &self.redactor, bytes)
     }
 
     pub fn clean(&self, text: &str) -> String {
-        String::from_utf8_lossy(&self.redactor.redact(text.as_bytes())).into_owned()
+        self.redactor.redact_str(text)
     }
 
     pub fn statements(&mut self, statements: &[String]) {
@@ -75,6 +87,12 @@ impl<'a> Context<'a> {
             .map(|statement| self.clean(statement))
             .collect();
     }
+}
+
+fn emit(out: &mut dyn Write, redactor: &Redactor, bytes: &[u8]) -> Result<(), Failure> {
+    out.write_all(&redactor.redact(bytes))
+        .and_then(|_| out.flush())
+        .map_err(|error| Failure::Write(error.to_string()))
 }
 
 pub async fn send(name: &str, args: &[String]) -> Result<u8, Failure> {
@@ -170,13 +188,100 @@ pub fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
+pub fn mode(connection: &Connection) -> &'static str {
+    match (connection.url.engine.write_flag(), connection.write) {
+        (true, true) => "read-write",
+        (true, false) => "read-only",
+        _ if connection.allow.is_empty() => "read-only",
+        _ => "rules",
+    }
+}
+
+pub fn describe(connection: &Connection) -> &'static str {
+    match connection.url.engine {
+        engine if engine.write_flag() && connection.write => "read-write, each statement commits",
+        Engine::Postgres => "read-only, each statement runs in a read-only transaction",
+        Engine::ClickHouse => "read-only, the server runs each statement with readonly=1",
+        _ if connection.allow.is_empty() => "read-only, other commands need an allow rule",
+        _ => "reads, plus what the allow rules below match",
+    }
+}
+
+pub fn writes(connection: &Connection, statements: usize) -> Vec<String> {
+    let mut lines = vec![
+        format!("statements: {statements}"),
+        format!("mode: {}", describe(connection)),
+    ];
+    if !connection.write {
+        lines.push(write_hint(&connection.name));
+    }
+    lines
+}
+
+pub fn read_only(connection: &Connection, detail: &str) -> Failure {
+    Failure::Denied(format!(
+        "denied: {} is read-only{detail}\n{}",
+        connection.name,
+        write_hint(&connection.name)
+    ))
+}
+
+pub fn not_allowed(
+    connection: &Connection,
+    reads: &str,
+    action: &str,
+    on: Option<&str>,
+    target: Option<&str>,
+) -> Failure {
+    let name = &connection.name;
+    let on = on.map(|on| format!(" on {on}")).unwrap_or_default();
+    let target = target
+        .map(|target| format!(" {}", quote(target)))
+        .unwrap_or_default();
+    Failure::Denied(format!(
+        "denied: {name} allows {reads} only, and no allow rule covers {action}{on}\nto allow it, the user can run: dbcli allow add {name} {}{target}",
+        quote(action)
+    ))
+}
+
+pub fn summary(rules: impl IntoIterator<Item = Option<String>>) -> String {
+    let mut seen = Vec::new();
+    for rule in rules {
+        let rule = rule.unwrap_or_else(|| "read".into());
+        if !seen.contains(&rule) {
+            seen.push(rule);
+        }
+    }
+    seen.join(", ")
+}
+
+pub fn hex(data: &[u8]) -> String {
+    let mut text = String::with_capacity(data.len() * 2);
+    for byte in data {
+        text.push(char::from_digit(u32::from(byte >> 4), 16).unwrap_or('0'));
+        text.push(char::from_digit(u32::from(byte & 0x0f), 16).unwrap_or('0'));
+    }
+    text
+}
+
+pub fn uuid(data: &[u8; 16]) -> String {
+    let hex = hex(data);
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
+
 pub fn redactor(vault: &Vault) -> Redactor {
     Redactor::new(MASK, vault.secrets())
 }
 
 pub fn scrub(failure: Failure, redactor: &Redactor) -> Failure {
-    let clean =
-        |text: String| String::from_utf8_lossy(&redactor.redact(text.as_bytes())).into_owned();
+    let clean = |text: String| redactor.redact_str(&text);
     match failure {
         Failure::Connect(text) => Failure::Connect(clean(text)),
         Failure::Tls(text) => Failure::Tls(clean(text)),

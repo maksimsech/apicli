@@ -92,7 +92,7 @@ pub async fn perform(
     let mut redirects = 0;
     loop {
         entry.method = method.to_string();
-        entry.url = String::from_utf8_lossy(&redactor.redact(url.as_str().as_bytes())).into_owned();
+        entry.url = redactor.redact_str(url.as_str());
         let view = body.as_ref().map(|bytes| Body {
             len: bytes.len(),
             content_type: headers
@@ -116,10 +116,7 @@ pub async fn perform(
         let request_headers = with_credential(&headers, credential, vault)?;
         if args.verbose {
             for line in request_lines(&method, &url, &request_headers) {
-                eprintln!(
-                    "{}",
-                    String::from_utf8_lossy(&redactor.redact(line.as_bytes()))
-                );
+                eprintln!("{}", redactor.redact_str(&line));
             }
         }
         let mut request = client

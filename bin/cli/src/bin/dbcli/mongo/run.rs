@@ -16,7 +16,10 @@ use super::{
     parse::parse,
     plan::{Bulked, Plan, Shape, Step, check, plan},
 };
-use crate::call::Context;
+use crate::{
+    call::{Context, summary},
+    secret::rotate_hint,
+};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const BATCH: usize = 20;
@@ -36,21 +39,17 @@ pub async fn run(
     let args = arguments(args)?;
     context.statements(&args.eval);
     let plans = plans(connection, &args.eval)?;
-    let mut rules = Vec::new();
-    for step in plans.iter().flat_map(|plan| &plan.steps) {
-        let rule = check(connection, step)?
-            .rule
-            .unwrap_or_else(|| "read".into());
-        if !rules.contains(&rule) {
-            rules.push(rule);
-        }
-    }
-    context.entry.rule = Some(rules.join(", "));
+    let rules = plans
+        .iter()
+        .flat_map(|plan| &plan.steps)
+        .map(|step| check(connection, step).map(|verdict| verdict.rule))
+        .collect::<Result<Vec<_>, _>>()?;
+    context.entry.rule = Some(summary(rules));
     let client = connect(connection).await?;
     let mut last = None;
     for plan in plans {
         if !plan.steps.is_empty() {
-            context.take(connection, args.wait)?;
+            context.take(connection, args.common.wait)?;
         }
         last = Some(
             execute(&client, plan)
@@ -133,10 +132,9 @@ impl Problem {
             Problem::Driver(error) => error,
         };
         match *error.kind {
-            ErrorKind::Authentication { message, .. } => Failure::Connect(format!(
-                "{message}\nif the password changed, the user can run: dbcli secret rotate {}",
-                connection.name
-            )),
+            ErrorKind::Authentication { message, .. } => {
+                Failure::Connect(format!("{message}\n{}", rotate_hint(&connection.name)))
+            }
             ErrorKind::Command(error) => {
                 Failure::Database(format!("MongoServerError: {}", error.message))
             }
@@ -170,11 +168,11 @@ async fn execute(client: &Client, plan: Plan) -> Result<Output, Problem> {
             } else {
                 format!("switched to db {name}")
             };
-            Output::Text(text.clone(), Bson::String(text))
+            Output::Value(Bson::String(text))
         }
-        Shape::Name(name) => Output::Text(name.clone(), Bson::String(name)),
+        Shape::Name(name) => Output::Value(Bson::String(name)),
         Shape::Databases => {
-            let reply = command(client, &next()?).await?;
+            let reply = command(client, next()?).await?;
             let databases = reply.get_array("databases").cloned().unwrap_or_default();
             let rows = databases
                 .iter()
@@ -189,7 +187,7 @@ async fn execute(client: &Client, plan: Plan) -> Result<Output, Problem> {
             Output::Text(table(&rows, &[false, true]), Bson::Array(databases))
         }
         Shape::Collections => {
-            let (collections, _) = cursor(client, &next()?, None).await?;
+            let (collections, _) = cursor(client, next()?, None).await?;
             let mut rows = collections
                 .iter()
                 .filter_map(Bson::as_document)
@@ -217,7 +215,7 @@ async fn execute(client: &Client, plan: Plan) -> Result<Output, Problem> {
             Output::Text(table(&rows, &[false, false]), Bson::Array(names))
         }
         Shape::Names => {
-            let (collections, _) = cursor(client, &next()?, None).await?;
+            let (collections, _) = cursor(client, next()?, None).await?;
             Output::Value(Bson::Array(
                 collections
                     .iter()
@@ -227,28 +225,29 @@ async fn execute(client: &Client, plan: Plan) -> Result<Output, Problem> {
             ))
         }
         Shape::Cursor(all) => {
-            let (documents, more) = cursor(client, &next()?, (!all).then_some(BATCH)).await?;
+            let (documents, more) = cursor(client, next()?, (!all).then_some(BATCH)).await?;
             Output::Cursor(documents, more)
         }
         Shape::First => {
-            let reply = command(client, &next()?).await?;
+            let reply = command(client, next()?).await?;
             Output::Value(batch(&reply).first().cloned().unwrap_or(Bson::Null))
         }
         Shape::Count => {
-            let reply = command(client, &next()?).await?;
+            let reply = command(client, next()?).await?;
             let count = batch(&reply)
                 .first()
                 .and_then(Bson::as_document)
                 .and_then(|group| group.get("n"))
+                .cloned()
                 .map_or(Bson::Int32(0), number);
             Output::Value(count)
         }
         Shape::Number => {
-            let reply = command(client, &next()?).await?;
-            Output::Value(reply.get("n").map_or(Bson::Int32(0), number))
+            let reply = command(client, next()?).await?;
+            Output::Value(reply.get("n").cloned().map_or(Bson::Int32(0), number))
         }
         Shape::Values => {
-            let reply = command(client, &next()?).await?;
+            let reply = command(client, next()?).await?;
             Output::Value(
                 reply
                     .get("values")
@@ -257,7 +256,7 @@ async fn execute(client: &Client, plan: Plan) -> Result<Output, Problem> {
             )
         }
         Shape::Inserted(ids, many) => {
-            written(command(client, &next()?).await?)?;
+            written(command(client, next()?).await?)?;
             if many {
                 let ids = ids
                     .into_iter()
@@ -275,121 +274,119 @@ async fn execute(client: &Client, plan: Plan) -> Result<Output, Problem> {
             }
         }
         Shape::Updated => {
-            let reply = written(command(client, &next()?).await?)?;
-            let upserted = reply.get_array("upserted").cloned().unwrap_or_default();
-            let inserted = upserted
-                .first()
-                .and_then(Bson::as_document)
-                .and_then(|upsert| upsert.get("_id"))
-                .cloned()
-                .unwrap_or(Bson::Null);
-            Output::Value(Bson::Document(doc! {
+            let update = updated(&written(command(client, next()?).await?)?);
+            counts(doc! {
                 "acknowledged": true,
-                "insertedId": inserted,
-                "matchedCount": count(&reply, "n") - upserted.len() as i64,
-                "modifiedCount": count(&reply, "nModified"),
-                "upsertedCount": upserted.len() as i64,
-            }))
-            .map_numbers()
+                "insertedId": update.id.unwrap_or(Bson::Null),
+                "matchedCount": update.matched,
+                "modifiedCount": update.modified,
+                "upsertedCount": update.upserted,
+            })
         }
         Shape::Deleted => {
-            let reply = written(command(client, &next()?).await?)?;
-            Output::Value(Bson::Document(
-                doc! {"acknowledged": true, "deletedCount": count(&reply, "n")},
-            ))
-            .map_numbers()
+            let reply = written(command(client, next()?).await?)?;
+            counts(doc! {"acknowledged": true, "deletedCount": count(&reply, "n")})
         }
         Shape::Modified => {
-            let reply = command(client, &next()?).await?;
+            let reply = command(client, next()?).await?;
             Output::Value(reply.get("value").cloned().unwrap_or(Bson::Null))
         }
         Shape::Bulk(kinds) => {
-            let mut totals = [0i64; 5];
-            let mut inserted = Document::new();
-            let mut upserts = Document::new();
+            let (mut inserted, mut matched, mut modified, mut deleted, mut upserted) =
+                (0, 0, 0, 0, 0);
+            let mut inserted_ids = Document::new();
+            let mut upserted_ids = Document::new();
             for kind in kinds {
-                let reply = written(command(client, &next()?).await?)?;
+                let reply = written(command(client, next()?).await?)?;
                 match kind {
                     Bulked::Insert(index, id) => {
-                        totals[0] += count(&reply, "n");
-                        inserted.insert(index.to_string(), id);
+                        inserted += count(&reply, "n");
+                        inserted_ids.insert(index.to_string(), id);
                     }
                     Bulked::Update(index) => {
-                        let upserted = reply.get_array("upserted").cloned().unwrap_or_default();
-                        totals[1] += count(&reply, "n") - upserted.len() as i64;
-                        totals[2] += count(&reply, "nModified");
-                        totals[4] += upserted.len() as i64;
-                        if let Some(id) = upserted
-                            .first()
-                            .and_then(Bson::as_document)
-                            .and_then(|upsert| upsert.get("_id"))
-                        {
-                            upserts.insert(index.to_string(), id.clone());
+                        let update = updated(&reply);
+                        matched += update.matched;
+                        modified += update.modified;
+                        upserted += update.upserted;
+                        if let Some(id) = update.id {
+                            upserted_ids.insert(index.to_string(), id);
                         }
                     }
-                    Bulked::Delete => totals[3] += count(&reply, "n"),
+                    Bulked::Delete => deleted += count(&reply, "n"),
                 }
             }
-            Output::Value(Bson::Document(doc! {
+            counts(doc! {
                 "acknowledged": true,
-                "insertedCount": totals[0],
-                "insertedIds": inserted,
-                "matchedCount": totals[1],
-                "modifiedCount": totals[2],
-                "deletedCount": totals[3],
-                "upsertedCount": totals[4],
-                "upsertedIds": upserts,
-            }))
-            .map_numbers()
+                "insertedCount": inserted,
+                "insertedIds": inserted_ids,
+                "matchedCount": matched,
+                "modifiedCount": modified,
+                "deletedCount": deleted,
+                "upsertedCount": upserted,
+                "upsertedIds": upserted_ids,
+            })
         }
         Shape::Index(name) => {
-            command(client, &next()?).await?;
-            Output::Text(name.clone(), Bson::String(name))
+            command(client, next()?).await?;
+            Output::Value(Bson::String(name))
         }
-        Shape::Dropped => match command(client, &next()?).await {
+        Shape::Dropped => match command(client, next()?).await {
             Ok(_) => Output::Value(Bson::Boolean(true)),
             Err(Problem::Driver(error)) if matches!(&*error.kind, ErrorKind::Command(error) if error.code == NOT_FOUND) => {
                 Output::Value(Bson::Boolean(false))
             }
             Err(problem) => return Err(problem),
         },
-        Shape::Reply => Output::Value(Bson::Document(command(client, &next()?).await?)),
+        Shape::Reply => Output::Value(Bson::Document(command(client, next()?).await?)),
     };
     Ok(output)
 }
 
-impl Output {
-    fn map_numbers(self) -> Output {
-        match self {
-            Output::Value(Bson::Document(document)) => Output::Value(Bson::Document(
-                document
-                    .into_iter()
-                    .map(|(key, value)| match value {
-                        Bson::Int64(_) => (key, number(&value)),
-                        _ => (key, value),
-                    })
-                    .collect(),
-            )),
-            output => output,
-        }
+struct Update {
+    matched: i64,
+    modified: i64,
+    upserted: i64,
+    id: Option<Bson>,
+}
+
+fn updated(reply: &Document) -> Update {
+    let upserted = reply
+        .get_array("upserted")
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    Update {
+        matched: count(reply, "n") - upserted.len() as i64,
+        modified: count(reply, "nModified"),
+        upserted: upserted.len() as i64,
+        id: upserted
+            .first()
+            .and_then(Bson::as_document)
+            .and_then(|upsert| upsert.get("_id"))
+            .cloned(),
     }
 }
 
-async fn command(client: &Client, step: &Step) -> Result<Document, Problem> {
-    Ok(client
-        .database(&step.db)
-        .run_command(step.command.clone())
-        .await?)
+fn counts(document: Document) -> Output {
+    Output::Value(Bson::Document(
+        document
+            .into_iter()
+            .map(|(key, value)| (key, number(value)))
+            .collect(),
+    ))
+}
+
+async fn command(client: &Client, step: Step) -> Result<Document, Problem> {
+    Ok(client.database(&step.db).run_command(step.command).await?)
 }
 
 async fn cursor(
     client: &Client,
-    step: &Step,
+    step: Step,
     limit: Option<usize>,
 ) -> Result<(Vec<Bson>, bool), Problem> {
     let mut cursor = client
         .database(&step.db)
-        .run_cursor_command(step.command.clone())
+        .run_cursor_command(step.command)
         .await?;
     let mut documents = Vec::new();
     while cursor.advance().await? {
@@ -432,14 +429,10 @@ fn count(reply: &Document, key: &str) -> i64 {
     }
 }
 
-fn number(value: &Bson) -> Bson {
+fn number(value: Bson) -> Bson {
     match value {
-        Bson::Int64(value) => match i32::try_from(*value) {
-            Ok(value) => Bson::Int32(value),
-            Err(_) => Bson::Double(*value as f64),
-        },
-        Bson::Int32(_) | Bson::Double(_) => value.clone(),
-        other => other.clone(),
+        Bson::Int64(value) => i32::try_from(value).map_or(Bson::Double(value as f64), Bson::Int32),
+        other => other,
     }
 }
 

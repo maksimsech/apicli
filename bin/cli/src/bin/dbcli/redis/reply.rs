@@ -1,3 +1,5 @@
+use std::{iter::repeat_n, str::from_utf8};
+
 use apicli::Failure;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -140,10 +142,14 @@ fn item(buf: &[u8]) -> Result<Option<(Item, usize)>, Failure> {
 }
 
 fn number(line: &[u8]) -> Result<i64, Failure> {
-    std::str::from_utf8(line)
+    from_utf8(line)
         .ok()
         .and_then(|text| text.parse().ok())
         .ok_or_else(bad)
+}
+
+pub fn lossy(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 fn bad() -> Failure {
@@ -217,7 +223,7 @@ fn standard(reply: &Reply, prefix: &[u8]) -> Vec<u8> {
             let count = if map { items.len() / 2 } else { items.len() };
             let width = count.to_string().len();
             let mut nested = prefix.to_vec();
-            nested.extend(std::iter::repeat_n(b' ', width + 2));
+            nested.extend(repeat_n(b' ', width + 2));
             let separator = match reply {
                 Reply::Set(_) => '~',
                 Reply::Map(_) => '#',
@@ -259,12 +265,7 @@ fn raw(reply: &Reply) -> Vec<u8> {
         Reply::Bool(value) => out.extend_from_slice(if *value { b"(true)" } else { b"(false)" }),
         Reply::Integer(number) => out.extend_from_slice(number.to_string().as_bytes()),
         Reply::Array(items) | Reply::Set(items) | Reply::Push(items) => {
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push(b'\n');
-                }
-                out.extend_from_slice(&raw(item));
-            }
+            out = items.iter().map(raw).collect::<Vec<_>>().join(&b'\n');
         }
         Reply::Map(items) => {
             for (index, pair) in items.chunks(2).enumerate() {
@@ -297,12 +298,7 @@ fn csv(reply: &Reply) -> Vec<u8> {
         Reply::Nil => out.extend_from_slice(b"NULL"),
         Reply::Bool(value) => out.extend_from_slice(if *value { b"true" } else { b"false" }),
         Reply::Array(items) | Reply::Map(items) | Reply::Set(items) | Reply::Push(items) => {
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push(b',');
-                }
-                out.extend_from_slice(&csv(item));
-            }
+            out = items.iter().map(csv).collect::<Vec<_>>().join(&b',');
         }
     }
     out
@@ -323,12 +319,7 @@ fn json(reply: &Reply) -> Vec<u8> {
         Reply::Bool(value) => out.extend_from_slice(if *value { b"true" } else { b"false" }),
         Reply::Array(items) | Reply::Set(items) | Reply::Push(items) => {
             out.push(b'[');
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push(b',');
-                }
-                out.extend_from_slice(&json(item));
-            }
+            out.extend(items.iter().map(json).collect::<Vec<_>>().join(&b','));
             out.push(b']');
         }
         Reply::Map(items) => {

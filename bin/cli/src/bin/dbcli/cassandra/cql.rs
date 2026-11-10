@@ -2,8 +2,8 @@ use apicli::Failure;
 use apicli_policy::Connection;
 
 use crate::{
-    call::quote,
-    split::{Lexed, Statement, Token, split, tokens, word},
+    call::{not_allowed, quote},
+    split::{Dialect, Statement, Token, split, tokens, word},
 };
 
 const LOCAL_FILES: &str = "it reads or writes local files";
@@ -20,12 +20,10 @@ pub enum Local {
 
 pub enum Action {
     Local(Local),
-    Server {
-        counted: bool,
-        describe: Option<String>,
-        keyspace: Option<String>,
-        rule: Option<String>,
-    },
+    Rows,
+    Describe(String),
+    Use(String),
+    Write(String),
 }
 
 pub struct Step {
@@ -43,7 +41,7 @@ pub fn plan(
     let mut keyspace = start;
     let mut steps = Vec::new();
     for source in sources {
-        for statement in split(source, false, true) {
+        for statement in split(source, Dialect::Cql) {
             steps.push(classify(connection, statement, &mut keyspace)?);
         }
     }
@@ -55,8 +53,10 @@ fn classify(
     statement: Statement,
     keyspace: &mut Option<String>,
 ) -> Result<Step, Failure> {
-    let lexed = tokens(&statement.text, false);
-    let list = lexed.iter().map(|lexed| &lexed.token).collect::<Vec<_>>();
+    let list = tokens(&statement.text, Dialect::Cql)
+        .into_iter()
+        .map(|lexed| lexed.token)
+        .collect::<Vec<_>>();
     let keyword = match list.first() {
         Some(Token::Word(word)) => word.to_ascii_uppercase(),
         _ => String::new(),
@@ -69,27 +69,21 @@ fn classify(
         flag: keyword.clone(),
         reason,
     };
-    let server = |counted, describe, switched, rule| Action::Server {
-        counted,
-        describe,
-        keyspace: switched,
-        rule,
-    };
     let (label, action) = match keyword.as_str() {
-        "SELECT" | "LIST" => (keyword.clone(), server(true, None, None, None)),
+        "SELECT" | "LIST" => (keyword.clone(), Action::Rows),
         "DESCRIBE" | "DESC" => {
             let what = next(1).unwrap_or_default().to_ascii_lowercase();
-            (keyword.clone(), server(false, Some(what), None, None))
+            (keyword.clone(), Action::Describe(what))
         }
         "USE" => {
-            let name = identifier(list.get(1).copied()).ok_or_else(|| {
+            let name = identifier(list.get(1)).ok_or_else(|| {
                 Failure::Usage(format!(
                     "line {}: USE needs a keyspace name",
                     statement.line
                 ))
             })?;
             *keyspace = Some(name.clone());
-            (format!("USE {name}"), server(false, None, Some(name), None))
+            (format!("USE {name}"), Action::Use(name))
         }
         "CONSISTENCY" => (keyword.clone(), Action::Local(Local::Consistency(next(1)))),
         "SERIAL" if next(1).is_some_and(|word| word.eq_ignore_ascii_case("CONSISTENCY")) => {
@@ -110,8 +104,8 @@ fn classify(
         {
             let mut rules = Vec::new();
             let mut labels = Vec::new();
-            for inner in batch(&lexed) {
-                let (action, target) = write(&inner, keyspace);
+            for inner in batch(&list) {
+                let (action, target) = write(inner, keyspace);
                 if !matches!(action.as_str(), "INSERT" | "UPDATE" | "DELETE") {
                     return Err(Failure::Usage(format!(
                         "line {}: a BATCH holds only INSERT, UPDATE and DELETE",
@@ -124,7 +118,7 @@ fn classify(
             rules.dedup();
             (
                 format!("BATCH {}", labels.join(", ")),
-                server(false, None, None, Some(rules.join(", "))),
+                Action::Write(rules.join(", ")),
             )
         }
         _ if !WRITES.contains(&keyword.as_str()) => {
@@ -135,19 +129,12 @@ fn classify(
                     quote(&keyword)
                 ))
             })?;
-            (
-                keyword.clone(),
-                server(false, None, None, Some(rule.to_string())),
-            )
+            (keyword.clone(), Action::Write(rule.to_string()))
         }
         _ => {
-            let tokens = list.into_iter().cloned().collect::<Vec<_>>();
-            let (action, target) = write(&tokens, keyspace);
+            let (action, target) = write(&list, keyspace);
             let rule = allowed(connection, &action, target.as_deref())?;
-            (
-                label(&action, target.as_deref()),
-                server(false, None, None, Some(rule)),
-            )
+            (label(&action, target.as_deref()), Action::Write(rule))
         }
     };
     Ok(Step {
@@ -158,11 +145,7 @@ fn classify(
     })
 }
 
-fn batch(lexed: &[Lexed]) -> Vec<Vec<Token>> {
-    let list = lexed
-        .iter()
-        .map(|lexed| lexed.token.clone())
-        .collect::<Vec<_>>();
+fn batch(list: &[Token]) -> Vec<&[Token]> {
     let start = list
         .iter()
         .position(|token| word(token, "BATCH"))
@@ -186,7 +169,6 @@ fn batch(lexed: &[Lexed]) -> Vec<Vec<Token>> {
     }
     body.split(|token| *token == Token::Symbol(';'))
         .filter(|inner| !inner.is_empty())
-        .map(<[Token]>::to_vec)
         .collect()
 }
 
@@ -274,23 +256,10 @@ fn identifier(token: Option<&Token>) -> Option<String> {
 
 fn allowed(connection: &Connection, action: &str, target: Option<&str>) -> Result<String, Failure> {
     let targets = target.map(str::as_bytes).into_iter().collect::<Vec<_>>();
-    if let Some(rule) = connection.rule(action, &targets) {
-        return Ok(rule.to_string());
+    match connection.rule(action, &targets) {
+        Some(rule) => Ok(rule.to_string()),
+        None => Err(not_allowed(connection, "reads", action, target, target)),
     }
-    let name = &connection.name;
-    let (on, hint) = match target {
-        Some(target) => (
-            format!(" on {target}"),
-            format!("dbcli allow add {name} {} {}", quote(action), quote(target)),
-        ),
-        None => (
-            String::new(),
-            format!("dbcli allow add {name} {}", quote(action)),
-        ),
-    };
-    Err(Failure::Denied(format!(
-        "denied: {name} allows reads only, and no allow rule covers {action}{on}\nto allow it, the user can run: {hint}"
-    )))
 }
 
 fn label(action: &str, target: Option<&str>) -> String {

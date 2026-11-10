@@ -51,6 +51,10 @@ pub struct ConnectionUrl {
 }
 
 impl Engine {
+    pub fn write_flag(self) -> bool {
+        matches!(self, Engine::Postgres | Engine::ClickHouse)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Engine::Postgres => "Postgres",

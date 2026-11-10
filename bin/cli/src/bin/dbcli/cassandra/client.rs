@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use apicli::Failure;
 use apicli_policy::{Connection, Tls};
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use secrecy::ExposeSecret;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -10,7 +10,10 @@ use tokio::{
 };
 
 use super::value::{Kind, Reader};
-use crate::tls::{Io, dial, lost, secure};
+use crate::{
+    secret::rotate_hint,
+    tls::{Io, dial, lost, secure},
+};
 
 const VERSION: u8 = 0x04;
 const PAGE: i32 = 5000;
@@ -47,7 +50,7 @@ pub struct Session {
 
 struct Frame {
     opcode: u8,
-    body: Vec<u8>,
+    body: Bytes,
     warnings: Vec<String>,
 }
 
@@ -59,18 +62,19 @@ impl Session {
     ) -> Result<Session, Failure> {
         let mut last = None;
         for (host, port) in &connection.url.hosts {
-            match timeout(connect, Session::start(connection, host, *port, limit)).await {
-                Ok(Ok(session)) => return Ok(session),
-                Ok(Err(
-                    failure @ (Failure::Connect(_) | Failure::Dns(_) | Failure::Network(_)),
-                )) => {
-                    if matches!(&failure, Failure::Connect(text) if text.contains("dbcli secret rotate"))
-                    {
-                        return Err(failure);
-                    }
-                    last = Some(failure);
+            match timeout(connect, reach(connection, host, *port)).await {
+                Ok(Ok(io)) => {
+                    let mut session = Session {
+                        io,
+                        buf: BytesMut::with_capacity(8192),
+                        limit,
+                    };
+                    timeout(connect, session.start(connection, host, *port))
+                        .await
+                        .map_err(|_| Failure::Timeout)??;
+                    return Ok(session);
                 }
-                Ok(Err(failure)) => return Err(failure),
+                Ok(Err(failure)) => last = Some(failure),
                 Err(_) => last = Some(Failure::Timeout),
             }
         }
@@ -78,30 +82,19 @@ impl Session {
     }
 
     async fn start(
+        &mut self,
         connection: &Connection,
         host: &str,
         port: u16,
-        limit: Duration,
-    ) -> Result<Session, Failure> {
+    ) -> Result<(), Failure> {
         let url = &connection.url;
-        let stream = dial(host, port).await?;
-        let io: Box<dyn Io> = if url.tls == Tls::Require {
-            Box::new(secure(host, url.root_cert.as_deref(), None, "cacert", stream).await?)
-        } else {
-            Box::new(stream)
-        };
-        let mut session = Session {
-            io,
-            buf: BytesMut::with_capacity(8192),
-            limit,
-        };
         let mut body = Vec::new();
         body.extend_from_slice(&1u16.to_be_bytes());
         string(&mut body, "CQL_VERSION");
         string(&mut body, "3.0.0");
-        let frame = session.call(STARTUP, &body).await?;
+        let frame = self.call(STARTUP, &body).await?;
         match frame.opcode {
-            READY => return Ok(session),
+            READY => return Ok(()),
             AUTHENTICATE => {}
             ERROR => return Err(Failure::Connect(server_error(&frame.body)?.message)),
             _ => return Err(unexpected()),
@@ -113,17 +106,15 @@ impl Session {
         let mut body = Vec::new();
         body.extend_from_slice(&(token.len() as i32).to_be_bytes());
         body.extend_from_slice(&token);
-        let frame = session.call(AUTH_RESPONSE, &body).await?;
+        let frame = self.call(AUTH_RESPONSE, &body).await?;
         match frame.opcode {
-            AUTH_SUCCESS => Ok(session),
+            AUTH_SUCCESS => Ok(()),
             ERROR => {
                 let error = server_error(&frame.body)?;
                 let mut text = format!("{host}, port {port}: {}", error.message);
                 if error.code == BAD_CREDENTIALS {
-                    text.push_str(&format!(
-                        "\nif the password changed, the user can run: dbcli secret rotate {}",
-                        connection.name
-                    ));
+                    text.push_str(&format!("
+{}", rotate_hint(&connection.name)));
                 }
                 Err(Failure::Connect(text))
             }
@@ -227,7 +218,7 @@ impl Session {
                     let flags = self.buf[1];
                     let opcode = self.buf[4];
                     self.buf.advance(9);
-                    let body = self.buf.split_to(length).to_vec();
+                    let body = self.buf.split_to(length).freeze();
                     let mut reader = Reader::new(&body);
                     if flags & 0x02 != 0 {
                         reader.take(16)?;
@@ -246,7 +237,7 @@ impl Session {
                     let start = reader.position();
                     return Ok(Frame {
                         opcode,
-                        body: body[start..].to_vec(),
+                        body: body.slice(start..),
                         warnings,
                     });
                 }
@@ -257,6 +248,16 @@ impl Session {
             }
         }
     }
+}
+
+async fn reach(connection: &Connection, host: &str, port: u16) -> Result<Box<dyn Io>, Failure> {
+    let url = &connection.url;
+    let stream = dial(host, port).await?;
+    Ok(if url.tls == Tls::Require {
+        Box::new(secure(host, url.root_cert.as_deref(), None, "cacert", stream).await?)
+    } else {
+        Box::new(stream)
+    })
 }
 
 fn string(out: &mut Vec<u8>, text: &str) {

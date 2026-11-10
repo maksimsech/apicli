@@ -1,14 +1,10 @@
-use apicli_policy::{Connection, Vault};
+use apicli_policy::Vault;
 use apicli_vault::Store;
 
-use super::{Server, limited, run, server, store, vault};
+use super::{Server, limited, run, server, store, vault, writes};
 
 fn postgres() -> Option<Server> {
     server("DBCLI_TEST_POSTGRES")
-}
-
-fn writes(connection: &mut Connection) {
-    connection.write = true;
 }
 
 async fn setup(server: &Server, table: &str) -> (Vault, Store) {

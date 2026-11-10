@@ -1,22 +1,11 @@
-use apicli_policy::{Allow, Connection, ConnectionUrl, Vault};
+use apicli_policy::{ConnectionUrl, Vault};
 use apicli_vault::Store;
 use secrecy::SecretString;
 
-use super::{Run, Server, limited, run, server, store, vault};
+use super::{Run, Server, allow, limited, run, server, store, vault};
 
 fn mongo() -> Option<Server> {
     server("DBCLI_TEST_MONGO")
-}
-
-fn allow(rules: &[(&str, &str)]) -> impl FnOnce(&mut Connection) {
-    let rules = rules
-        .iter()
-        .map(|(action, target)| Allow {
-            action: action.to_string(),
-            target: Some(target.to_string()),
-        })
-        .collect::<Vec<_>>();
-    move |connection| connection.allow = rules
 }
 
 fn eval(expressions: &[&str]) -> Vec<String> {
@@ -38,7 +27,10 @@ async fn javascript_and_refused_flags_never_connect() {
         url: ConnectionUrl::parse("mongodb://agent@127.0.0.1:1/shop").unwrap(),
         password: "never-sent-123".into(),
     };
-    let writer = vault(&offline, allow(&[("insert", "*"), ("delete", "*")]));
+    let writer = vault(
+        &offline,
+        allow(&[("insert", Some("*")), ("delete", Some("*"))]),
+    );
     let store = store("mongo-refused");
 
     for args in [
@@ -85,7 +77,10 @@ async fn reads_run_and_writes_need_a_matching_rule() {
     let db = server.url.database.clone();
     let writer = vault(
         &server,
-        allow(&[("insert", &format!("{db}.dbcli_rule*")), ("drop", "*")]),
+        allow(&[
+            ("insert", Some(&format!("{db}.dbcli_rule*"))),
+            ("drop", Some("*")),
+        ]),
     );
     let reader = vault(&server, |_| {});
     let store = store("mongo-rule");
@@ -156,7 +151,10 @@ async fn a_denied_expression_stops_every_expression() {
     let db = server.url.database.clone();
     let writer = vault(
         &server,
-        allow(&[("insert", &format!("{db}.dbcli_all")), ("drop", "*")]),
+        allow(&[
+            ("insert", Some(&format!("{db}.dbcli_all"))),
+            ("drop", Some("*")),
+        ]),
     );
     let store = store("mongo-all");
     evaluate(&["db.dbcli_all.drop()"], &writer, &store).await;
@@ -185,7 +183,10 @@ async fn password_is_masked_in_output_errors_and_log() {
     let password = server.password.clone();
     let writer = vault(
         &server,
-        allow(&[("insert", &format!("{db}.dbcli_mask")), ("drop", "*")]),
+        allow(&[
+            ("insert", Some(&format!("{db}.dbcli_mask"))),
+            ("drop", Some("*")),
+        ]),
     );
     let store = store("mongo-masked");
     evaluate(&["db.dbcli_mask.drop()"], &writer, &store).await;
@@ -231,7 +232,7 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
     let rules = [("insert", format!("{db}.dbcli_rate")), ("drop", "*".into())];
     let rules = rules
         .iter()
-        .map(|(action, target)| (*action, target.as_str()))
+        .map(|(action, target)| (*action, Some(target.as_str())))
         .collect::<Vec<_>>();
     let capped = vault(&server, |connection| {
         allow(&rules)(connection);

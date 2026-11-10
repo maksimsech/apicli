@@ -7,7 +7,7 @@ use super::{
     meta::{self, Meta},
     output::{Options, Table, render},
 };
-use crate::call::Context;
+use crate::call::{Context, mode, read_only, writes};
 
 const TAGGED: [&str; 4] = ["INSERT", "UPDATE", "DELETE", "MERGE"];
 
@@ -26,12 +26,12 @@ pub async fn run(
     let options = args.check()?;
     let steps = steps(&args)?;
     context.entry.rule = Some(mode(connection).into());
-    context.take(connection, args.wait)?;
+    context.take(connection, args.common.wait)?;
     let mut session = Session::open(connection).await?;
     let mut result = Ok(0);
     for (index, step) in steps.iter().enumerate() {
         if index > 0
-            && let Err(failure) = context.take(connection, args.wait)
+            && let Err(failure) = context.take(connection, args.common.wait)
         {
             result = Err(failure);
             break;
@@ -48,34 +48,7 @@ pub async fn run(
 pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, Failure> {
     let args = parse(args)?;
     args.check()?;
-    let steps = steps(&args)?;
-    let mut lines = vec![
-        format!("statements: {}", steps.len()),
-        format!("mode: {}", describe(connection)),
-    ];
-    if !connection.write {
-        lines.push(format!(
-            "to allow writes, the user can run: dbcli allow add {} write",
-            connection.name
-        ));
-    }
-    Ok(lines)
-}
-
-pub fn mode(connection: &Connection) -> &'static str {
-    if connection.write {
-        "read-write"
-    } else {
-        "read-only"
-    }
-}
-
-pub fn describe(connection: &Connection) -> &'static str {
-    if connection.write {
-        "read-write, each statement commits"
-    } else {
-        "read-only, each statement runs in a read-only transaction"
-    }
+    Ok(writes(connection, steps(&args)?.len()))
 }
 
 async fn run_step(
@@ -156,10 +129,7 @@ fn reply_text(reply: Reply, options: &Options) -> Vec<u8> {
 fn server_failure(error: &ServerError, sql: &str, connection: &Connection) -> Failure {
     let text = error.render(Some(sql));
     if error.code == READ_ONLY && !connection.write {
-        Failure::Denied(format!(
-            "denied: {name} is read-only\n{text}\nto allow writes, the user can run: dbcli allow add {name} write",
-            name = connection.name
-        ))
+        read_only(connection, &format!("\n{text}"))
     } else {
         Failure::Database(text)
     }

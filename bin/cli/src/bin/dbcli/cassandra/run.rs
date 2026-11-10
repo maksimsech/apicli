@@ -10,7 +10,7 @@ use super::{
     cql::{Action, Local, Step, plan, protect},
     value::{format, text},
 };
-use crate::call::Context;
+use crate::call::{Context, summary};
 
 const LEVELS: [(&str, u16); 11] = [
     ("ANY", 0x0000),
@@ -26,9 +26,11 @@ const LEVELS: [(&str, u16); 11] = [
     ("LOCAL_ONE", 0x000A),
 ];
 
+type Level = (&'static str, u16);
+
 struct State {
-    consistency: &'static str,
-    serial: &'static str,
+    consistency: Level,
+    serial: Level,
     expand: bool,
     keyspace: Option<String>,
     errors: Vec<String>,
@@ -43,16 +45,13 @@ pub async fn run(
     context.statements(&args.execute);
     let start = start(connection, &args);
     let steps = plan(connection, &args.execute, start.clone())?;
-    let mut rules = Vec::new();
-    for step in &steps {
-        if let Action::Server { rule, .. } = &step.action {
-            let rule = rule.clone().unwrap_or_else(|| "read".into());
-            if !rules.contains(&rule) {
-                rules.push(rule);
-            }
-        }
-    }
-    context.entry.rule = Some(rules.join(", "));
+    context.entry.rule = Some(summary(steps.iter().filter_map(
+        |step| match &step.action {
+            Action::Local(_) => None,
+            Action::Write(rule) => Some(Some(rule.clone())),
+            Action::Rows | Action::Describe(_) | Action::Use(_) => Some(None),
+        },
+    )));
     let mut session = Session::open(
         connection,
         seconds(args.connect_timeout),
@@ -60,16 +59,17 @@ pub async fn run(
     )
     .await?;
     let mut state = State {
-        consistency: "ONE",
-        serial: "SERIAL",
+        consistency: ("ONE", 0x0001),
+        serial: ("SERIAL", 0x0008),
         expand: false,
         keyspace: None,
         errors: Vec::new(),
     };
+    let wait = args.common.wait;
     let result = execute(
         &mut session,
         connection,
-        &args,
+        wait,
         start,
         steps,
         &mut state,
@@ -95,10 +95,10 @@ pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, 
                 "{}: a cqlsh command, nothing reaches the server",
                 step.label
             ),
-            Action::Server {
-                rule: Some(rule), ..
-            } => format!("{}: allowed by {rule}", step.label),
-            Action::Server { rule: None, .. } => format!("{}: a read, so it runs", step.label),
+            Action::Write(rule) => format!("{}: allowed by {rule}", step.label),
+            Action::Rows | Action::Describe(_) | Action::Use(_) => {
+                format!("{}: a read, so it runs", step.label)
+            }
         })
         .collect())
 }
@@ -117,7 +117,7 @@ fn seconds(value: f64) -> Duration {
 async fn execute(
     session: &mut Session,
     connection: &Connection,
-    args: &CqlshArgs,
+    wait: Option<f64>,
     start: Option<String>,
     steps: Vec<Step>,
     state: &mut State,
@@ -125,7 +125,11 @@ async fn execute(
 ) -> Result<(), Failure> {
     if let Some(keyspace) = start {
         match session
-            .query(&format!("USE {}", protect(&keyspace)), 0x0001, 0x0008)
+            .query(
+                &format!("USE {}", protect(&keyspace)),
+                state.consistency.1,
+                state.serial.1,
+            )
             .await?
         {
             Ok(_) => state.keyspace = Some(keyspace),
@@ -138,29 +142,25 @@ async fn execute(
         let mut out = String::new();
         match step.action {
             Action::Local(local) => local_command(local, step.line, state, &mut out),
-            Action::Server {
-                counted,
-                describe,
-                keyspace,
-                ..
-            } => {
-                context.take(connection, args.wait)?;
-                let consistency = level(state.consistency);
-                let serial = level(state.serial);
-                match session.query(&step.text, consistency, serial).await? {
+            action => {
+                context.take(connection, wait)?;
+                let reply = session
+                    .query(&step.text, state.consistency.1, state.serial.1)
+                    .await?;
+                match reply {
                     Err(error) => state.errors.push(format!(
                         "<stdin>:{}:{}",
                         step.line,
                         describe_error(&error)
                     )),
                     Ok(reply) => {
-                        if keyspace.is_some() {
-                            state.keyspace = keyspace;
-                        }
                         let rows = reply.rows;
-                        match (&describe, &rows) {
-                            (Some(what), Some(rows)) => described(what, rows, state, &mut out),
-                            (_, Some(rows)) if counted => {
+                        match (action, &rows) {
+                            (Action::Use(keyspace), _) => state.keyspace = Some(keyspace),
+                            (Action::Describe(what), Some(rows)) => {
+                                described(&what, rows, state, &mut out)
+                            }
+                            (Action::Rows, Some(rows)) => {
                                 counted_rows(rows, state.expand, &mut out)
                             }
                             (_, Some(rows)) if !rows.rows.is_empty() => {
@@ -189,28 +189,28 @@ fn local_command(local: Local, line: usize, state: &mut State, out: &mut String)
         Local::Consistency(None) => {
             out.push_str(&format!(
                 "Current consistency level is {}.\n",
-                state.consistency
+                state.consistency.0
             ));
         }
         Local::Serial(None) => {
             out.push_str(&format!(
                 "Current serial consistency level is {}.\n",
-                state.serial
+                state.serial.0
             ));
         }
         Local::Consistency(Some(wanted)) => match named(&wanted, false) {
-            Some(name) => {
-                state.consistency = name;
-                out.push_str(&format!("Consistency level set to {name}.\n"));
+            Some(level) => {
+                state.consistency = level;
+                out.push_str(&format!("Consistency level set to {}.\n", level.0));
             }
             None => state
                 .errors
                 .push(format!("<stdin>:{line}:Improper consistency command.")),
         },
         Local::Serial(Some(wanted)) => match named(&wanted, true) {
-            Some(name) => {
-                state.serial = name;
-                out.push_str(&format!("Serial consistency level set to {name}.\n"));
+            Some(level) => {
+                state.serial = level;
+                out.push_str(&format!("Serial consistency level set to {}.\n", level.0));
             }
             None => state.errors.push(format!(
                 "<stdin>:{line}:Improper serial consistency command."
@@ -245,25 +245,18 @@ fn local_command(local: Local, line: usize, state: &mut State, out: &mut String)
     }
 }
 
-fn named(wanted: &str, serial: bool) -> Option<&'static str> {
+fn named(wanted: &str, serial: bool) -> Option<Level> {
     LEVELS
         .iter()
-        .map(|(name, _)| *name)
-        .find(|name| name.eq_ignore_ascii_case(wanted))
-        .filter(|name| !serial || matches!(*name, "SERIAL" | "LOCAL_SERIAL"))
-}
-
-fn level(name: &str) -> u16 {
-    LEVELS
-        .iter()
-        .find(|(level, _)| *level == name)
-        .map_or(0x0001, |(_, code)| *code)
+        .find(|(name, _)| name.eq_ignore_ascii_case(wanted))
+        .filter(|(name, _)| !serial || matches!(*name, "SERIAL" | "LOCAL_SERIAL"))
+        .copied()
 }
 
 fn counted_rows(rows: &Rows, expand: bool, out: &mut String) {
     out.push('\n');
     if rows.rows.is_empty() {
-        header(rows, &widths(rows), out);
+        header(rows, &widths(rows, &[]), out);
         out.push_str("\n\n(0 rows)\n");
         return;
     }
@@ -303,7 +296,7 @@ fn table(rows: &Rows, expand: bool, out: &mut String) {
         }
         return;
     }
-    let widths = widths(rows);
+    let widths = widths(rows, &cells);
     header(rows, &widths, out);
     for row in &cells {
         let line = row
@@ -333,8 +326,7 @@ fn header(rows: &Rows, widths: &[usize], out: &mut String) {
     out.push_str(&format!("-{rule}-\n"));
 }
 
-fn widths(rows: &Rows) -> Vec<usize> {
-    let cells = cells(rows);
+fn widths(rows: &Rows, cells: &[Vec<(String, usize)>]) -> Vec<usize> {
     rows.columns
         .iter()
         .enumerate()

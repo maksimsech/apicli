@@ -4,6 +4,8 @@ use apicli::Failure;
 use chrono::{DateTime, Duration, NaiveDate};
 use unicode_width::UnicodeWidthStr;
 
+use crate::call::{hex, uuid};
+
 const PRECISION: i32 = 5;
 
 #[derive(Debug, Clone)]
@@ -59,15 +61,11 @@ impl<'a> Reader<'a> {
     }
 
     pub fn short(&mut self) -> Result<u16, Failure> {
-        Ok(u16::from_be_bytes(
-            self.take(2)?.try_into().map_err(|_| bad())?,
-        ))
+        Ok(u16::from_be_bytes(array(self.take(2)?)?))
     }
 
     pub fn int(&mut self) -> Result<i32, Failure> {
-        Ok(i32::from_be_bytes(
-            self.take(4)?.try_into().map_err(|_| bad())?,
-        ))
+        Ok(i32::from_be_bytes(array(self.take(4)?)?))
     }
 
     pub fn string(&mut self) -> Result<String, Failure> {
@@ -189,6 +187,10 @@ fn custom(class: &str) -> Kind {
     }
 }
 
+fn array<const N: usize>(data: &[u8]) -> Result<[u8; N], Failure> {
+    data.try_into().map_err(|_| bad())
+}
+
 fn bad() -> Failure {
     Failure::Network("bad message from the server".into())
 }
@@ -210,13 +212,6 @@ pub fn text(data: Option<&[u8]>) -> String {
 }
 
 fn value(kind: &Kind, data: &[u8], quote: bool) -> Result<(String, usize), Failure> {
-    let fixed = |size: usize| -> Result<&[u8], Failure> {
-        if data.len() == size {
-            Ok(data)
-        } else {
-            Err(bad())
-        }
-    };
     let collection = |items: Vec<(String, usize)>, open: &str, close: &str, joint: usize| {
         let width = items.iter().map(|(_, width)| width).sum::<usize>() + joint * items.len();
         let text = items
@@ -231,49 +226,35 @@ fn value(kind: &Kind, data: &[u8], quote: bool) -> Result<(String, usize), Failu
     };
     let text = match kind {
         Kind::Ascii | Kind::Text => escape(&String::from_utf8_lossy(data), quote),
-        Kind::Bigint | Kind::Counter => {
-            i64::from_be_bytes(fixed(8)?.try_into().map_err(|_| bad())?).to_string()
+        Kind::Bigint | Kind::Counter => i64::from_be_bytes(array(data)?).to_string(),
+        Kind::Int => i32::from_be_bytes(array(data)?).to_string(),
+        Kind::Smallint => i16::from_be_bytes(array(data)?).to_string(),
+        Kind::Tinyint => (array::<1>(data)?[0] as i8).to_string(),
+        Kind::Boolean => if array::<1>(data)?[0] != 0 {
+            "True"
+        } else {
+            "False"
         }
-        Kind::Int => i32::from_be_bytes(fixed(4)?.try_into().map_err(|_| bad())?).to_string(),
-        Kind::Smallint => i16::from_be_bytes(fixed(2)?.try_into().map_err(|_| bad())?).to_string(),
-        Kind::Tinyint => (fixed(1)?[0] as i8).to_string(),
-        Kind::Boolean => if fixed(1)?[0] != 0 { "True" } else { "False" }.into(),
+        .into(),
         Kind::Blob | Kind::Custom => format!("0x{}", hex(data)),
-        Kind::Double => float(f64::from_be_bytes(fixed(8)?.try_into().map_err(|_| bad())?)),
-        Kind::Float => float(f64::from(f32::from_be_bytes(
-            fixed(4)?.try_into().map_err(|_| bad())?,
-        ))),
+        Kind::Double => float(f64::from_be_bytes(array(data)?)),
+        Kind::Float => float(f64::from(f32::from_be_bytes(array(data)?))),
         Kind::Varint => varint(data),
         Kind::Decimal => {
-            let scale = i32::from_be_bytes(
-                data.get(..4)
-                    .ok_or_else(bad)?
-                    .try_into()
-                    .map_err(|_| bad())?,
-            );
+            let scale = i32::from_be_bytes(array(data.get(..4).ok_or_else(bad)?)?);
             decimal(&varint(&data[4..]), scale)
         }
-        Kind::Uuid | Kind::Timeuuid => {
-            let hex = hex(fixed(16)?);
-            format!(
-                "{}-{}-{}-{}-{}",
-                &hex[..8],
-                &hex[8..12],
-                &hex[12..16],
-                &hex[16..20],
-                &hex[20..]
-            )
-        }
+        Kind::Uuid | Kind::Timeuuid => uuid(&array::<16>(data)?),
         Kind::Inet => {
             let text = match data.len() {
-                4 => Ipv4Addr::from(<[u8; 4]>::try_from(data).map_err(|_| bad())?).to_string(),
-                16 => Ipv6Addr::from(<[u8; 16]>::try_from(data).map_err(|_| bad())?).to_string(),
+                4 => Ipv4Addr::from(array::<4>(data)?).to_string(),
+                16 => Ipv6Addr::from(array::<16>(data)?).to_string(),
                 _ => return Err(bad()),
             };
             quoted(text, quote)
         }
         Kind::Timestamp => {
-            let millis = i64::from_be_bytes(fixed(8)?.try_into().map_err(|_| bad())?);
+            let millis = i64::from_be_bytes(array(data)?);
             let text = DateTime::from_timestamp_millis(millis).map_or_else(
                 || millis.to_string(),
                 |date| date.format("%Y-%m-%d %H:%M:%S%.6f+0000").to_string(),
@@ -281,8 +262,7 @@ fn value(kind: &Kind, data: &[u8], quote: bool) -> Result<(String, usize), Failu
             quoted(text, quote)
         }
         Kind::Date => {
-            let days =
-                i64::from(u32::from_be_bytes(fixed(4)?.try_into().map_err(|_| bad())?)) - (1 << 31);
+            let days = i64::from(u32::from_be_bytes(array(data)?)) - (1 << 31);
             NaiveDate::from_ymd_opt(1970, 1, 1)
                 .and_then(|epoch| epoch.checked_add_signed(Duration::days(days)))
                 .map_or_else(
@@ -291,7 +271,7 @@ fn value(kind: &Kind, data: &[u8], quote: bool) -> Result<(String, usize), Failu
                 )
         }
         Kind::Time => {
-            let nanos = i64::from_be_bytes(fixed(8)?.try_into().map_err(|_| bad())?);
+            let nanos = i64::from_be_bytes(array(data)?);
             let seconds = nanos / 1_000_000_000;
             format!(
                 "{:02}:{:02}:{:02}.{:09}",
@@ -431,10 +411,6 @@ fn escape(text: &str, quote: bool) -> String {
         out.push('\'');
     }
     out
-}
-
-fn hex(data: &[u8]) -> String {
-    data.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn float(value: f64) -> String {

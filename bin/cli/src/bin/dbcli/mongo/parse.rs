@@ -58,14 +58,8 @@ impl Parser {
         match word.as_str() {
             "use" | "show" if self.peek().is_some_and(char::is_whitespace) => {
                 self.space()?;
-                let begin = self.position;
-                while self
-                    .peek()
-                    .is_some_and(|character| !character.is_whitespace() && character != ';')
-                {
-                    self.position += 1;
-                }
-                let argument = self.chars[begin..self.position].iter().collect::<String>();
+                let argument =
+                    self.take_while(|character| !character.is_whitespace() && character != ';');
                 if argument.is_empty() {
                     return Err(self.unexpected());
                 }
@@ -92,7 +86,7 @@ impl Parser {
                 self.name().ok_or_else(|| self.unexpected())?
             } else if self.eat('[') {
                 self.space()?;
-                let Some(Bson::String(name)) = self.string()? else {
+                let Some(name) = self.string()? else {
                     return Err(self.unexpected());
                 };
                 self.space()?;
@@ -141,7 +135,10 @@ impl Parser {
                 self.position += 1;
                 self.list(']').map(Bson::Array)
             }
-            '\'' | '"' | '`' => self.string()?.ok_or_else(|| self.unexpected()),
+            '\'' | '"' | '`' => self
+                .string()?
+                .map(Bson::String)
+                .ok_or_else(|| self.unexpected()),
             '/' => self.regex(),
             '-' | '+' => {
                 self.position += 1;
@@ -168,10 +165,7 @@ impl Parser {
                 return Ok(document);
             }
             let key = match self.peek() {
-                Some('\'' | '"' | '`') => match self.string()? {
-                    Some(Bson::String(key)) => key,
-                    _ => return Err(self.unexpected()),
-                },
+                Some('\'' | '"' | '`') => self.string()?.ok_or_else(|| self.unexpected())?,
                 Some('0'..='9') => match self.number()? {
                     Bson::Int32(number) => number.to_string(),
                     Bson::Double(number) => number.to_string(),
@@ -316,34 +310,17 @@ impl Parser {
         if self.peek() == Some('0') && matches!(self.chars.get(self.position + 1), Some('x' | 'X'))
         {
             self.position += 2;
-            let begin = self.position;
-            while self
-                .peek()
-                .is_some_and(|character| character.is_ascii_hexdigit())
-            {
-                self.position += 1;
-            }
-            let digits = self.chars[begin..self.position].iter().collect::<String>();
+            let digits = self.take_while(|character| character.is_ascii_hexdigit());
             let number = i64::from_str_radix(&digits, 16).map_err(|_| self.unexpected())?;
             return Ok(number_value(number as f64));
         }
-        while self
-            .peek()
-            .is_some_and(|character| character.is_ascii_digit() || character == '.')
-        {
-            self.position += 1;
-        }
+        self.skip_while(|character| character.is_ascii_digit() || character == '.');
         if matches!(self.peek(), Some('e' | 'E')) {
             self.position += 1;
             if matches!(self.peek(), Some('+' | '-')) {
                 self.position += 1;
             }
-            while self
-                .peek()
-                .is_some_and(|character| character.is_ascii_digit())
-            {
-                self.position += 1;
-            }
+            self.skip_while(|character| character.is_ascii_digit());
         }
         let text = self.chars[start..self.position].iter().collect::<String>();
         let number = text.parse::<f64>().map_err(|_| {
@@ -353,7 +330,7 @@ impl Parser {
         Ok(number_value(number))
     }
 
-    fn string(&mut self) -> Result<Option<Bson>, Failure> {
+    fn string(&mut self) -> Result<Option<String>, Failure> {
         let Some(quote) = self
             .peek()
             .filter(|character| matches!(character, '\'' | '"' | '`'))
@@ -370,7 +347,7 @@ impl Parser {
             };
             self.position += 1;
             match character {
-                _ if character == quote => return Ok(Some(Bson::String(text))),
+                _ if character == quote => return Ok(Some(text)),
                 '$' if quote == '`' && self.peek() == Some('{') => {
                     self.position = start;
                     return Err(self.unexpected());
@@ -391,12 +368,7 @@ impl Parser {
                         '\n' => {}
                         'x' => text.push(self.hex(2)?),
                         'u' if self.eat('{') => {
-                            let begin = self.position;
-                            while self.peek().is_some_and(|character| character != '}') {
-                                self.position += 1;
-                            }
-                            let digits =
-                                self.chars[begin..self.position].iter().collect::<String>();
+                            let digits = self.take_while(|character| character != '}');
                             self.expect('}')?;
                             text.push(
                                 u32::from_str_radix(&digits, 16)
@@ -470,14 +442,7 @@ impl Parser {
             }
             pattern.push(character);
         }
-        let begin = self.position;
-        while self
-            .peek()
-            .is_some_and(|character| character.is_ascii_alphabetic())
-        {
-            self.position += 1;
-        }
-        let flags = self.chars[begin..self.position].iter().collect::<String>();
+        let flags = self.take_while(|character| character.is_ascii_alphabetic());
         regex(&pattern, &flags).ok_or_else(|| {
             self.position = start;
             self.unexpected()
@@ -506,9 +471,7 @@ impl Parser {
             match (self.peek(), self.chars.get(self.position + 1)) {
                 (Some(character), _) if character.is_whitespace() => self.position += 1,
                 (Some('/'), Some('/')) => {
-                    while self.peek().is_some_and(|character| character != '\n') {
-                        self.position += 1;
-                    }
+                    self.skip_while(|character| character != '\n');
                 }
                 (Some('/'), Some('*')) => {
                     let start = self.position;
@@ -530,6 +493,19 @@ impl Parser {
                 _ => return Ok(()),
             }
         }
+    }
+
+    fn skip_while(&mut self, keep: impl Fn(char) -> bool) -> usize {
+        let begin = self.position;
+        while self.peek().is_some_and(&keep) {
+            self.position += 1;
+        }
+        begin
+    }
+
+    fn take_while(&mut self, keep: impl Fn(char) -> bool) -> String {
+        let begin = self.skip_while(keep);
+        self.chars[begin..self.position].iter().collect()
     }
 
     fn peek(&self) -> Option<char> {

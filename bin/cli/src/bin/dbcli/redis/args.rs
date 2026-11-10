@@ -1,7 +1,7 @@
 use apicli::{Failure, Refused};
-use clap::{ArgAction, ColorChoice, Parser};
+use clap::{ColorChoice, Parser};
 
-use crate::call::engine_args;
+use crate::call::{Common, engine_args};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -55,22 +55,13 @@ pub struct RedisArgs {
     #[arg(long = "no-auth-warning", hide = true)]
     pub no_auth_warning: bool,
     #[arg(
-        long,
-        value_name = "SECONDS",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "30",
-        help = "Wait up to SECONDS (default 30) for the rate limit instead of failing"
-    )]
-    pub wait: Option<f64>,
-    #[arg(
         value_name = "COMMAND",
         trailing_var_arg = true,
         help = "The command and its arguments, like GET key"
     )]
     pub command: Vec<String>,
-    #[arg(long, action = ArgAction::Help, help = "Print help")]
-    help: Option<bool>,
+    #[command(flatten)]
+    pub common: Common,
 }
 
 const SERVER: &str = "the connection name picks the server";
@@ -78,71 +69,57 @@ const PASSWORD: &str = "dbcli sends the stored password itself";
 const TLS: &str = "the connection URL sets TLS";
 const ONE_SHOT: &str = "dbcli runs one command per call, or --scan";
 
-const fn refused(
-    short: Option<char>,
-    long: &'static str,
-    value: bool,
-    reason: &'static str,
-) -> Refused {
-    Refused {
-        short,
-        long,
-        value,
-        reason,
-    }
-}
-
-pub const REFUSED: &[Refused] = &[
-    refused(Some('h'), "host", true, SERVER),
-    refused(Some('p'), "port", true, SERVER),
-    refused(Some('s'), "socket", true, SERVER),
-    refused(Some('u'), "uri", true, SERVER),
-    refused(None, "user", true, "the connection name picks the user"),
-    refused(Some('a'), "pass", true, PASSWORD),
-    refused(None, "askpass", false, PASSWORD),
-    refused(None, "tls", false, TLS),
-    refused(None, "sni", true, TLS),
-    refused(None, "cacert", true, TLS),
-    refused(None, "cacertdir", true, TLS),
-    refused(None, "insecure", false, TLS),
-    refused(None, "cert", true, TLS),
-    refused(None, "key", true, TLS),
-    refused(None, "tls-ciphers", true, TLS),
-    refused(None, "tls-ciphersuites", true, TLS),
-    refused(
+const REFUSED: &[Refused] = &[
+    Refused::new(Some('h'), "host", true, SERVER),
+    Refused::new(Some('p'), "port", true, SERVER),
+    Refused::new(Some('s'), "socket", true, SERVER),
+    Refused::new(Some('u'), "uri", true, SERVER),
+    Refused::new(None, "user", true, "the connection name picks the user"),
+    Refused::new(Some('a'), "pass", true, PASSWORD),
+    Refused::new(None, "askpass", false, PASSWORD),
+    Refused::new(None, "tls", false, TLS),
+    Refused::new(None, "sni", true, TLS),
+    Refused::new(None, "cacert", true, TLS),
+    Refused::new(None, "cacertdir", true, TLS),
+    Refused::new(None, "insecure", false, TLS),
+    Refused::new(None, "cert", true, TLS),
+    Refused::new(None, "key", true, TLS),
+    Refused::new(None, "tls-ciphers", true, TLS),
+    Refused::new(None, "tls-ciphersuites", true, TLS),
+    Refused::new(
         Some('c'),
         "cluster-mode",
         false,
         "cluster mode is not supported",
     ),
-    refused(None, "cluster", true, "cluster mode is not supported"),
-    refused(Some('r'), "repeat", true, ONE_SHOT),
-    refused(Some('i'), "interval", true, ONE_SHOT),
-    refused(None, "pipe", false, ONE_SHOT),
-    refused(None, "rdb", true, ONE_SHOT),
-    refused(None, "functions-rdb", true, ONE_SHOT),
-    refused(None, "replica", false, ONE_SHOT),
-    refused(None, "slave", false, ONE_SHOT),
-    refused(None, "stat", false, ONE_SHOT),
-    refused(None, "latency", false, ONE_SHOT),
-    refused(None, "latency-history", false, ONE_SHOT),
-    refused(None, "latency-dist", false, ONE_SHOT),
-    refused(None, "intrinsic-latency", true, ONE_SHOT),
-    refused(None, "lru-test", true, ONE_SHOT),
-    refused(None, "bigkeys", false, ONE_SHOT),
-    refused(None, "memkeys", false, ONE_SHOT),
-    refused(None, "hotkeys", false, ONE_SHOT),
-    refused(None, "keystats", false, ONE_SHOT),
-    refused(
+    Refused::new(None, "cluster", true, "cluster mode is not supported"),
+    Refused::new(Some('r'), "repeat", true, ONE_SHOT),
+    Refused::new(Some('i'), "interval", true, ONE_SHOT),
+    Refused::new(None, "pipe", false, ONE_SHOT),
+    Refused::new(None, "rdb", true, ONE_SHOT),
+    Refused::new(None, "functions-rdb", true, ONE_SHOT),
+    Refused::new(None, "replica", false, ONE_SHOT),
+    Refused::new(None, "slave", false, ONE_SHOT),
+    Refused::new(None, "stat", false, ONE_SHOT),
+    Refused::new(None, "latency", false, ONE_SHOT),
+    Refused::new(None, "latency-history", false, ONE_SHOT),
+    Refused::new(None, "latency-dist", false, ONE_SHOT),
+    Refused::new(None, "intrinsic-latency", true, ONE_SHOT),
+    Refused::new(None, "lru-test", true, ONE_SHOT),
+    Refused::new(None, "bigkeys", false, ONE_SHOT),
+    Refused::new(None, "memkeys", false, ONE_SHOT),
+    Refused::new(None, "hotkeys", false, ONE_SHOT),
+    Refused::new(None, "keystats", false, ONE_SHOT),
+    Refused::new(
         None,
         "eval",
         true,
         "it reads a local file, pass the script to EVAL instead",
     ),
-    refused(None, "ldb", false, "the Lua debugger is not supported"),
+    Refused::new(None, "ldb", false, "the Lua debugger is not supported"),
 ];
 
-pub const COMMANDS: &[(&str, &str)] = &[
+const COMMANDS: &[(&str, &str)] = &[
     ("MONITOR", "it streams every command on the server"),
     ("SUBSCRIBE", "it waits for messages without end"),
     ("PSUBSCRIBE", "it waits for messages without end"),

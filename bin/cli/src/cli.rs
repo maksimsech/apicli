@@ -60,6 +60,20 @@ pub struct Refused {
 }
 
 impl Refused {
+    pub const fn new(
+        short: Option<char>,
+        long: &'static str,
+        value: bool,
+        reason: &'static str,
+    ) -> Refused {
+        Refused {
+            short,
+            long,
+            value,
+            reason,
+        }
+    }
+
     pub fn arg(&self) -> Arg {
         let action = if self.value {
             ArgAction::Set

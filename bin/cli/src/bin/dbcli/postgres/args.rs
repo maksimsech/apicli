@@ -1,8 +1,8 @@
 use apicli::{Failure, Refused};
-use clap::{ArgAction, ColorChoice, Parser};
+use clap::{ColorChoice, Parser};
 
 use super::output::{Format, Options};
-use crate::call::engine_args;
+use crate::call::{Common, engine_args};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -59,86 +59,67 @@ pub struct PsqlArgs {
     pub variables: Vec<String>,
     #[arg(short = 'X', long = "no-psqlrc", hide = true)]
     pub no_psqlrc: bool,
-    #[arg(
-        long,
-        value_name = "SECONDS",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "30",
-        help = "Wait up to SECONDS (default 30) for the rate limit instead of failing"
-    )]
-    pub wait: Option<f64>,
-    #[arg(long, action = ArgAction::Help, help = "Print help")]
-    help: Option<bool>,
+    #[command(flatten)]
+    pub common: Common,
 }
 
-pub const REFUSED: &[Refused] = &[
-    Refused {
-        short: Some('h'),
-        long: "host",
-        value: true,
-        reason: "the connection name picks the host",
-    },
-    Refused {
-        short: Some('p'),
-        long: "port",
-        value: true,
-        reason: "the connection name picks the port",
-    },
-    Refused {
-        short: Some('U'),
-        long: "username",
-        value: true,
-        reason: "the connection name picks the user",
-    },
-    Refused {
-        short: Some('d'),
-        long: "dbname",
-        value: true,
-        reason: "the connection name picks the database",
-    },
-    Refused {
-        short: Some('W'),
-        long: "password",
-        value: false,
-        reason: "dbcli sends the stored password itself",
-    },
-    Refused {
-        short: Some('w'),
-        long: "no-password",
-        value: false,
-        reason: "dbcli sends the stored password itself",
-    },
-    Refused {
-        short: Some('f'),
-        long: "file",
-        value: true,
-        reason: "scripts are not supported yet, pass each statement with -c",
-    },
-    Refused {
-        short: Some('o'),
-        long: "output",
-        value: true,
-        reason: "redirect stdout instead",
-    },
-    Refused {
-        short: Some('L'),
-        long: "log-file",
-        value: true,
-        reason: "dbcli keeps its own log, see dbcli log",
-    },
-    Refused {
-        short: Some('1'),
-        long: "single-transaction",
-        value: false,
-        reason: "each -c runs in its own transaction",
-    },
-    Refused {
-        short: Some('l'),
-        long: "list",
-        value: false,
-        reason: "use -c '\\l'",
-    },
+const REFUSED: &[Refused] = &[
+    Refused::new(
+        Some('h'),
+        "host",
+        true,
+        "the connection name picks the host",
+    ),
+    Refused::new(
+        Some('p'),
+        "port",
+        true,
+        "the connection name picks the port",
+    ),
+    Refused::new(
+        Some('U'),
+        "username",
+        true,
+        "the connection name picks the user",
+    ),
+    Refused::new(
+        Some('d'),
+        "dbname",
+        true,
+        "the connection name picks the database",
+    ),
+    Refused::new(
+        Some('W'),
+        "password",
+        false,
+        "dbcli sends the stored password itself",
+    ),
+    Refused::new(
+        Some('w'),
+        "no-password",
+        false,
+        "dbcli sends the stored password itself",
+    ),
+    Refused::new(
+        Some('f'),
+        "file",
+        true,
+        "scripts are not supported yet, pass each statement with -c",
+    ),
+    Refused::new(Some('o'), "output", true, "redirect stdout instead"),
+    Refused::new(
+        Some('L'),
+        "log-file",
+        true,
+        "dbcli keeps its own log, see dbcli log",
+    ),
+    Refused::new(
+        Some('1'),
+        "single-transaction",
+        false,
+        "each -c runs in its own transaction",
+    ),
+    Refused::new(Some('l'), "list", false, "use -c '\\l'"),
 ];
 
 pub fn parse(args: &[String]) -> Result<PsqlArgs, Failure> {

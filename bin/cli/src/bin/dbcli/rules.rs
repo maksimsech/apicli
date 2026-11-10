@@ -1,5 +1,5 @@
 use apicli::{Failure, finish, open_for_change};
-use apicli_policy::{Engine, Rate};
+use apicli_policy::Rate;
 
 use crate::{
     cli::{AllowCommand, LimitCommand},
@@ -21,7 +21,7 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
         } => (name, action, target, false),
     };
     let connection = vault.connection_mut(&name).ok_or_else(|| unknown(&name))?;
-    let message = if matches!(connection.url.engine, Engine::Postgres | Engine::ClickHouse) {
+    let message = if connection.url.engine.write_flag() {
         if !action.eq_ignore_ascii_case("write") || target.is_some() {
             return Err(Failure::Usage(format!(
                 "{} connections take only `dbcli allow add {name} write`, limits on tables belong in GRANTs",

@@ -9,8 +9,11 @@ use tokio::{
     time::timeout,
 };
 
-use super::reply::{Parser, Reply};
-use crate::tls::{Io, dial, lost, secure};
+use super::reply::{Parser, Reply, lossy};
+use crate::{
+    secret::rotate_hint,
+    tls::{Io, dial, lost, secure},
+};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -45,12 +48,13 @@ impl Client {
         }
         auth.push(password);
         if let Reply::Error(error) = client.call(&auth).await? {
-            let error = String::from_utf8_lossy(&error);
+            let error = lossy(&error);
             let mut text = format!("{}, port {}: AUTH failed: {error}", url.host, url.port);
             if error.starts_with("WRONGPASS") {
                 text.push_str(&format!(
-                    "\nif the password changed, the user can run: dbcli secret rotate {}",
-                    connection.name
+                    "
+{}",
+                    rotate_hint(&connection.name)
                 ));
             }
             return Err(Failure::Connect(text));
@@ -59,9 +63,7 @@ impl Client {
             && let Reply::Error(error) =
                 client.call(&[b"SELECT", db.to_string().as_bytes()]).await?
         {
-            return Err(Failure::Database(
-                String::from_utf8_lossy(&error).into_owned(),
-            ));
+            return Err(Failure::Database(lossy(&error)));
         }
         Ok(client)
     }

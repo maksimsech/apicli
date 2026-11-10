@@ -4,4 +4,4 @@ mod meta;
 mod output;
 mod run;
 
-pub use run::{describe, explain, mode, run};
+pub use run::{explain, run};

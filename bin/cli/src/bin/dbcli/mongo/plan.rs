@@ -1,3 +1,5 @@
+use std::mem::take;
+
 use apicli::Failure;
 use apicli_policy::Connection;
 use mongodb::bson::{Bson, Document, doc, oid::ObjectId};
@@ -6,7 +8,7 @@ use super::{
     inspect::js_number,
     parse::{Segment, Statement},
 };
-use crate::call::quote;
+use crate::call::not_allowed;
 
 const READS: [&str; 9] = [
     "find",
@@ -51,7 +53,6 @@ const STATEMENT: [&str; 4] = ["upsert", "arrayFilters", "hint", "collation"];
 pub struct Step {
     pub db: String,
     pub command: Document,
-    pub cursor: bool,
 }
 
 pub enum Bulked {
@@ -108,16 +109,10 @@ pub fn plan(statement: Statement, db: &mut String) -> Result<Plan, Failure> {
             })
         }
         Statement::Show(what) => match what.as_str() {
-            "dbs" | "databases" => Ok(single(
-                "admin",
-                doc! {"listDatabases": 1},
-                false,
-                Shape::Databases,
-            )),
+            "dbs" | "databases" => Ok(single("admin", doc! {"listDatabases": 1}, Shape::Databases)),
             "collections" | "tables" => Ok(single(
                 db,
                 doc! {"listCollections": 1, "nameOnly": true, "authorizedCollections": true},
-                true,
                 Shape::Collections,
             )),
             _ => Err(Failure::Usage(format!(
@@ -158,21 +153,20 @@ fn chain(segments: Vec<Segment>, current: &str) -> Result<Plan, Failure> {
                     break single(
                         &db,
                         doc! {"listCollections": 1, "nameOnly": true, "authorizedCollections": true},
-                        true,
                         Shape::Names,
                     );
                 }
-                (None, "stats") => break single(&db, doc! {"dbStats": 1}, false, Shape::Reply),
+                (None, "stats") => break single(&db, doc! {"dbStats": 1}, Shape::Reply),
                 (None, "runCommand") => {
-                    break single(&db, command(&args, &name)?, false, Shape::Reply);
+                    break single(&db, command(&args, &name)?, Shape::Reply);
                 }
                 (None, "adminCommand") => {
-                    break single("admin", command(&args, &name)?, false, Shape::Reply);
+                    break single("admin", command(&args, &name)?, Shape::Reply);
                 }
                 (None, "aggregate") => {
                     let mut command = doc! {"aggregate": 1};
                     command.extend(aggregate(&args, &name)?);
-                    break single(&db, command, true, Shape::Cursor(false));
+                    break single(&db, command, Shape::Cursor(false));
                 }
                 (None, _) => {
                     return Err(Failure::Usage(format!(
@@ -195,7 +189,7 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
                 command.insert("projection", projection);
             }
             copy(&mut command, option(2)?, &FIND, name)?;
-            single(db, command, true, Shape::Cursor(false))
+            single(db, command, Shape::Cursor(false))
         }
         "findOne" => {
             let mut command = doc! {"find": collection, "filter": option(0)?.unwrap_or_default()};
@@ -205,12 +199,12 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
             copy(&mut command, option(2)?, &FIND, name)?;
             command.insert("limit", 1);
             command.insert("singleBatch", true);
-            single(db, command, false, Shape::First)
+            single(db, command, Shape::First)
         }
         "aggregate" => {
             let mut command = doc! {"aggregate": collection};
             command.extend(aggregate(&args, name)?);
-            single(db, command, true, Shape::Cursor(false))
+            single(db, command, Shape::Cursor(false))
         }
         "countDocuments" => {
             let options = option(1)?.unwrap_or_default();
@@ -238,12 +232,12 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
                 &["hint", "maxTimeMS", "collation", "comment"],
                 name,
             )?;
-            single(db, command, false, Shape::Count)
+            single(db, command, Shape::Count)
         }
         "estimatedDocumentCount" => {
             let mut command = doc! {"count": collection};
             copy(&mut command, option(0)?, &["maxTimeMS", "comment"], name)?;
-            single(db, command, false, Shape::Number)
+            single(db, command, Shape::Number)
         }
         "count" => {
             let mut command = doc! {"count": collection, "query": option(0)?.unwrap_or_default()};
@@ -253,7 +247,7 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
                 &["limit", "skip", "hint", "maxTimeMS", "collation", "comment"],
                 name,
             )?;
-            single(db, command, false, Shape::Number)
+            single(db, command, Shape::Number)
         }
         "distinct" => {
             let mut command = doc! {"distinct": collection, "key": text(&args, 0, name)?};
@@ -266,20 +260,17 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
                 &["maxTimeMS", "collation", "comment"],
                 name,
             )?;
-            single(db, command, false, Shape::Values)
+            single(db, command, Shape::Values)
         }
-        "getIndexes" | "getIndexSpecs" => single(
-            db,
-            doc! {"listIndexes": collection},
-            true,
-            Shape::Cursor(true),
-        ),
+        "getIndexes" | "getIndexSpecs" => {
+            single(db, doc! {"listIndexes": collection}, Shape::Cursor(true))
+        }
         "insertOne" => {
             let mut document = required(&args, 0, name)?;
             let id = identify(&mut document);
             let mut command = doc! {"insert": collection, "documents": [document], "ordered": true};
             copy(&mut command, option(1)?, &WRITE, name)?;
-            single(db, command, false, Shape::Inserted(vec![id], false))
+            single(db, command, Shape::Inserted(vec![id], false))
         }
         "insertMany" => {
             let Some(Bson::Array(documents)) = args.first() else {
@@ -307,7 +298,7 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
                 .filter(|(key, _)| key != "ordered")
                 .collect();
             copy(&mut command, Some(rest), &WRITE, name)?;
-            single(db, command, false, Shape::Inserted(ids, true))
+            single(db, command, Shape::Inserted(ids, true))
         }
         "updateOne" | "updateMany" | "replaceOne" => {
             let filter = required(&args, 0, name)?;
@@ -319,7 +310,7 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
             copy(&mut statement, Some(inner), &STATEMENT, name)?;
             let mut command = doc! {"update": collection, "updates": [statement], "ordered": true};
             copy(&mut command, Some(outer), &WRITE, name)?;
-            single(db, command, false, Shape::Updated)
+            single(db, command, Shape::Updated)
         }
         "deleteOne" | "deleteMany" => {
             let filter = required(&args, 0, name)?;
@@ -330,7 +321,7 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
             copy(&mut statement, Some(inner), &["hint", "collation"], name)?;
             let mut command = doc! {"delete": collection, "deletes": [statement], "ordered": true};
             copy(&mut command, Some(outer), &WRITE, name)?;
-            single(db, command, false, Shape::Deleted)
+            single(db, command, Shape::Deleted)
         }
         "findOneAndUpdate" | "findOneAndReplace" | "findOneAndDelete" => {
             let mut command =
@@ -372,7 +363,7 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
                 ],
                 name,
             )?;
-            single(db, command, false, Shape::Modified)
+            single(db, command, Shape::Modified)
         }
         "bulkWrite" => bulk(db, collection, &args)?,
         "createIndex" => {
@@ -391,7 +382,6 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
             single(
                 db,
                 doc! {"createIndexes": collection, "indexes": [spec]},
-                false,
                 Shape::Index(index),
             )
         }
@@ -403,11 +393,10 @@ fn method(db: &str, collection: &str, name: &str, args: Vec<Bson>) -> Result<Pla
             single(
                 db,
                 doc! {"dropIndexes": collection, "index": index},
-                false,
                 Shape::Reply,
             )
         }
-        "drop" => single(db, doc! {"drop": collection}, false, Shape::Dropped),
+        "drop" => single(db, doc! {"drop": collection}, Shape::Dropped),
         _ => {
             return Err(Failure::Usage(format!(
                 "db.{collection}.{name}() is not supported, dbcli supports find, findOne, aggregate, countDocuments, estimatedDocumentCount, count, distinct, getIndexes, insertOne, insertMany, updateOne, updateMany, replaceOne, deleteOne, deleteMany, findOneAndUpdate, findOneAndReplace, findOneAndDelete, bulkWrite, createIndex, dropIndex, dropIndexes and drop"
@@ -444,7 +433,6 @@ fn modify(mut plan: Plan, segments: Vec<Segment>) -> Result<Plan, Failure> {
                 };
                 let inner = plan.steps[0].command.clone();
                 plan.steps[0].command = doc! {"explain": inner, "verbosity": verbosity};
-                plan.steps[0].cursor = false;
                 plan.shape = Shape::Reply;
             }
             "count" if finding => {
@@ -456,7 +444,6 @@ fn modify(mut plan: Plan, segments: Vec<Segment>) -> Result<Plan, Failure> {
                     .cloned()
                     .unwrap_or_default();
                 step.command = doc! {"count": collection, "query": filter};
-                step.cursor = false;
                 plan.shape = Shape::Number;
             }
             "sort" | "limit" | "skip" | "project" | "projection" | "hint" | "maxTimeMS"
@@ -554,7 +541,6 @@ fn bulk(db: &str, collection: &str, args: &[Bson]) -> Result<Plan, Failure> {
         steps.push(Step {
             db: db.to_string(),
             command,
-            cursor: false,
         });
     }
     Ok(Plan {
@@ -578,12 +564,13 @@ pub fn check(connection: &Connection, step: &Step) -> Result<Verdict, Failure> {
             action,
             namespace,
         }),
-        None => Err(Failure::Denied(format!(
-            "denied: {name} allows reads only, and no allow rule covers {action} on {namespace}\nto allow it, the user can run: dbcli allow add {name} {} {}",
-            quote(&action),
-            quote(&namespace),
-            name = connection.name
-        ))),
+        None => Err(not_allowed(
+            connection,
+            "reads",
+            &action,
+            Some(&namespace),
+            Some(&namespace),
+        )),
     }
 }
 
@@ -641,12 +628,11 @@ fn target(db: &str, value: &Bson) -> String {
     }
 }
 
-fn single(db: &str, command: Document, cursor: bool, shape: Shape) -> Plan {
+fn single(db: &str, command: Document, shape: Shape) -> Plan {
     Plan {
         steps: vec![Step {
             db: db.to_string(),
             command,
-            cursor,
         }],
         shape,
     }
@@ -771,7 +757,7 @@ fn identify(document: &mut Document) -> Bson {
         None => {
             let id = Bson::ObjectId(ObjectId::new());
             let mut identified = doc! {"_id": id.clone()};
-            identified.extend(std::mem::take(document));
+            identified.extend(take(document));
             *document = identified;
             id
         }

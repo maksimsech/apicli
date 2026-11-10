@@ -1,21 +1,10 @@
-use apicli_policy::{Allow, Connection, ConnectionUrl};
+use apicli_policy::ConnectionUrl;
 use secrecy::SecretString;
 
-use super::{Server, limited, run, server, store, vault};
+use super::{Server, allow, limited, run, server, store, vault};
 
 fn redis() -> Option<Server> {
     server("DBCLI_TEST_REDIS")
-}
-
-fn allow(rules: &[(&str, Option<&str>)]) -> impl FnOnce(&mut Connection) {
-    let rules = rules
-        .iter()
-        .map(|(action, target)| Allow {
-            action: action.to_string(),
-            target: target.map(String::from),
-        })
-        .collect::<Vec<_>>();
-    move |connection| connection.allow = rules
 }
 
 #[tokio::test(flavor = "current_thread")]

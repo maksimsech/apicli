@@ -1,24 +1,13 @@
-use apicli_policy::{Allow, Connection, ConnectionUrl, Vault};
+use apicli_policy::{ConnectionUrl, Vault};
 use apicli_vault::Store;
 use secrecy::SecretString;
 
-use super::{Run, Server, limited, run, server, store, vault};
+use super::{Run, Server, allow, limited, run, server, store, vault};
 
 const KEYSPACE: &str = "dbcli_test";
 
 fn cassandra() -> Option<Server> {
     server("DBCLI_TEST_CASSANDRA")
-}
-
-fn allow(rules: &[(&str, Option<&str>)]) -> impl FnOnce(&mut Connection) {
-    let rules = rules
-        .iter()
-        .map(|(action, target)| Allow {
-            action: action.to_string(),
-            target: target.map(String::from),
-        })
-        .collect::<Vec<_>>();
-    move |connection| connection.allow = rules
 }
 
 async fn cql(cql: &str, vault: &Vault, store: &Store) -> Run {

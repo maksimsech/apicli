@@ -1,15 +1,11 @@
-use apicli_policy::{Connection, ConnectionUrl, Vault};
+use apicli_policy::{ConnectionUrl, Vault};
 use apicli_vault::Store;
 use secrecy::SecretString;
 
-use super::{Run, Server, limited, run, server, store, vault};
+use super::{Run, Server, limited, run, server, store, vault, writes};
 
 fn clickhouse() -> Option<Server> {
     server("DBCLI_TEST_CLICKHOUSE")
-}
-
-fn writes(connection: &mut Connection) {
-    connection.write = true;
 }
 
 async fn sql(query: &str, vault: &Vault, store: &Store) -> Run {

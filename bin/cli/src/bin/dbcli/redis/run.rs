@@ -6,9 +6,9 @@ use apicli_policy::Connection;
 use super::{
     args::{RedisArgs, parse},
     client::Client,
-    reply::{Mode, Reply, format, repr},
+    reply::{Mode, Reply, format, lossy, repr},
 };
-use crate::call::{Context, quote};
+use crate::call::{Context, not_allowed, quote};
 
 const READS: [&str; 2] = ["PING", "INFO"];
 
@@ -33,7 +33,7 @@ pub async fn run(
             .map_err(|error| Failure::Read(format!("stdin: {error}")))?;
         words.push(input);
     }
-    context.take(connection, args.wait)?;
+    context.take(connection, args.common.wait)?;
     let mut client = Client::open(connection, db(connection, &args)).await?;
     let result = if args.scan {
         scan(&mut client, &args, context).await
@@ -82,7 +82,7 @@ async fn execute(
     }
     let reply = client.call(&refs(words)).await?;
     if let Reply::Error(error) = &reply {
-        let text = String::from_utf8_lossy(error).into_owned();
+        let text = lossy(error);
         context.entry.error = Some(context.clean(&text));
         if args.errors {
             return Err(Failure::Database(text));
@@ -114,10 +114,7 @@ async fn classify(
             .is_some_and(|subs| !subs.items().is_empty())
     });
     if container && let Some(sub) = words.get(1) {
-        action = format!(
-            "{name}|{}",
-            String::from_utf8_lossy(sub).to_ascii_uppercase()
-        );
+        action = format!("{name}|{}", lossy(sub).to_ascii_uppercase());
         info = lookup(client, &action).await?;
     }
     let read = READS.contains(&action.as_str())
@@ -148,9 +145,7 @@ async fn classify(
                     .collect();
             }
             Reply::Error(error) if !error.ends_with(b"no key arguments") => {
-                return Err(Failure::Database(
-                    String::from_utf8_lossy(&error).into_owned(),
-                ));
+                return Err(Failure::Database(lossy(&error)));
             }
             _ => {}
         }
@@ -174,7 +169,7 @@ async fn lookup(client: &mut Client, name: &str) -> Result<Option<Reply>, Failur
     match client.call(&[b"COMMAND", b"INFO", name.as_bytes()]).await? {
         Reply::Error(error) => Err(Failure::Database(format!(
             "dbcli needs COMMAND INFO and COMMAND GETKEYS to check commands: {}",
-            String::from_utf8_lossy(&error)
+            lossy(&error)
         ))),
         reply => Ok(reply
             .items()
@@ -201,9 +196,7 @@ async fn scan(
         call.extend([&b"COUNT"[..], count.as_bytes()]);
         let reply = client.call(&call).await?;
         if let Reply::Error(error) = &reply {
-            return Err(Failure::Database(
-                String::from_utf8_lossy(error).into_owned(),
-            ));
+            return Err(Failure::Database(lossy(error)));
         }
         let next = reply
             .items()
@@ -230,30 +223,23 @@ async fn scan(
 }
 
 fn denied(connection: &Connection, action: &str, keys: &[Vec<u8>]) -> Failure {
-    let name = &connection.name;
-    let (on, hint) = if keys.is_empty() {
-        (
-            String::new(),
-            format!("dbcli allow add {name} {}", quote(action)),
-        )
+    let (on, target) = if keys.is_empty() {
+        (None, None)
     } else {
-        (
-            format!(" on {}", shown(keys)),
-            format!(
-                "dbcli allow add {name} {} {}",
-                quote(action),
-                quote(&pattern(keys))
-            ),
-        )
+        (Some(shown(keys)), Some(pattern(keys)))
     };
-    Failure::Denied(format!(
-        "denied: {name} allows read commands only, and no allow rule covers {action}{on}\nto allow it, the user can run: {hint}"
-    ))
+    not_allowed(
+        connection,
+        "read commands",
+        action,
+        on.as_deref(),
+        target.as_deref(),
+    )
 }
 
 fn pattern(keys: &[Vec<u8>]) -> String {
     let escape = |bytes: &[u8]| {
-        String::from_utf8_lossy(bytes)
+        lossy(bytes)
             .chars()
             .flat_map(|character| {
                 let escaped = matches!(character, '*' | '?' | '[' | ']' | '\\');
@@ -280,7 +266,7 @@ fn pattern(keys: &[Vec<u8>]) -> String {
 
 fn shown(keys: &[Vec<u8>]) -> String {
     keys.iter()
-        .map(|key| String::from_utf8_lossy(key).into_owned())
+        .map(|key| lossy(key))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -339,7 +325,7 @@ fn verbatim(words: &[Vec<u8>]) -> bool {
     let word = |index: usize| {
         words
             .get(index)
-            .map(|word| String::from_utf8_lossy(word).to_ascii_lowercase())
+            .map(|word| lossy(word).to_ascii_lowercase())
             .unwrap_or_default()
     };
     let (command, sub, count) = (word(0), word(1), words.len());

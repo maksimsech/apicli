@@ -18,7 +18,14 @@ pub struct Statement {
     pub terminated: bool,
 }
 
-pub fn tokens(text: &str, backslash: bool) -> Vec<Lexed> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Dialect {
+    Cql,
+    ClickHouse,
+}
+
+pub fn tokens(text: &str, dialect: Dialect) -> Vec<Lexed> {
+    let backslash = dialect == Dialect::ClickHouse;
     let chars = text.char_indices().collect::<Vec<_>>();
     let at = |index: usize| chars.get(index).map(|(_, character)| *character);
     let offset = |index: usize| chars.get(index).map_or(text.len(), |(offset, _)| *offset);
@@ -140,9 +147,11 @@ pub fn tokens(text: &str, backslash: bool) -> Vec<Lexed> {
     tokens
 }
 
-pub fn split(text: &str, backslash: bool, batches: bool) -> Vec<Statement> {
-    let tokens = tokens(text, backslash);
+pub fn split(text: &str, dialect: Dialect) -> Vec<Statement> {
+    let tokens = tokens(text, dialect);
+    let batches = dialect == Dialect::Cql;
     let mut statements = Vec::new();
+    let mut lines = (1, 0);
     let mut first: Option<usize> = None;
     let mut batch = false;
     for (index, lexed) in tokens.iter().enumerate() {
@@ -164,11 +173,11 @@ pub fn split(text: &str, backslash: bool, batches: bool) -> Vec<Statement> {
             && !batch
             && let Some(start) = first.take()
         {
-            statements.push(piece(text, &tokens[start..index], true));
+            statements.push(piece(text, &tokens[start..index], true, &mut lines));
         }
     }
     if let Some(start) = first {
-        statements.push(piece(text, &tokens[start..], false));
+        statements.push(piece(text, &tokens[start..], false, &mut lines));
     }
     statements
 }
@@ -177,12 +186,14 @@ pub fn word(token: &Token, expected: &str) -> bool {
     matches!(token, Token::Word(word) if word.eq_ignore_ascii_case(expected))
 }
 
-fn piece(text: &str, tokens: &[Lexed], terminated: bool) -> Statement {
+fn piece(text: &str, tokens: &[Lexed], terminated: bool, lines: &mut (usize, usize)) -> Statement {
     let start = tokens.first().map_or(0, |lexed| lexed.start);
     let end = tokens.last().map_or(start, |lexed| lexed.end);
+    lines.0 += text[lines.1..start].matches('\n').count();
+    lines.1 = start;
     Statement {
         text: text[start..end].to_string(),
-        line: text[..start].matches('\n').count() + 1,
+        line: lines.0,
         terminated,
     }
 }
@@ -191,8 +202,8 @@ fn piece(text: &str, tokens: &[Lexed], terminated: bool) -> Statement {
 mod tests {
     use super::*;
 
-    fn texts(text: &str, backslash: bool) -> Vec<String> {
-        split(text, backslash, true)
+    fn texts(text: &str, dialect: Dialect) -> Vec<String> {
+        split(text, dialect)
             .into_iter()
             .map(|statement| statement.text)
             .collect()
@@ -203,7 +214,7 @@ mod tests {
         assert_eq!(
             texts(
                 "select 'a;b' from t; -- c;d\n/* e;f */ insert into t (\"x;y\") values ($$g;h$$);;",
-                false
+                Dialect::Cql
             ),
             [
                 "select 'a;b' from t",
@@ -211,10 +222,13 @@ mod tests {
             ]
         );
         assert_eq!(
-            texts(r"select 'a\';b' ; select `c;d`; select $tag$e;f$tag$", true),
+            texts(
+                r"select 'a\';b' ; select `c;d`; select $tag$e;f$tag$",
+                Dialect::ClickHouse
+            ),
             [r"select 'a\';b'", "select `c;d`", "select $tag$e;f$tag$"]
         );
-        assert_eq!(texts(r"select 'a\'; delete from t", false).len(), 2);
+        assert_eq!(texts(r"select 'a\'; delete from t", Dialect::Cql).len(), 2);
     }
 
     #[test]
@@ -222,7 +236,7 @@ mod tests {
         assert_eq!(
             texts(
                 "BEGIN BATCH INSERT INTO a (k) VALUES (1); DELETE FROM b WHERE k = 1; APPLY BATCH; TRUNCATE c",
-                false
+                Dialect::Cql
             ),
             [
                 "BEGIN BATCH INSERT INTO a (k) VALUES (1); DELETE FROM b WHERE k = 1; APPLY BATCH",

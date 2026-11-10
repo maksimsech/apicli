@@ -7,7 +7,7 @@ mod redis;
 use std::{env, fs, process};
 
 use apicli::Entry;
-use apicli_policy::{Connection, ConnectionUrl, Rate, Vault};
+use apicli_policy::{Allow, Connection, ConnectionUrl, Rate, Vault};
 use apicli_vault::Store;
 use percent_encoding::percent_decode_str;
 use secrecy::SecretString;
@@ -50,6 +50,21 @@ fn vault(server: &Server, configure: impl FnOnce(&mut Connection)) -> Vault {
         connections: vec![connection],
         ..Vault::default()
     }
+}
+
+fn allow(rules: &[(&str, Option<&str>)]) -> impl FnOnce(&mut Connection) {
+    let rules = rules
+        .iter()
+        .map(|(action, target)| Allow {
+            action: action.to_string(),
+            target: target.map(String::from),
+        })
+        .collect::<Vec<_>>();
+    move |connection| connection.allow = rules
+}
+
+fn writes(connection: &mut Connection) {
+    connection.write = true;
 }
 
 fn limited(rate: &str) -> impl FnOnce(&mut Connection) {

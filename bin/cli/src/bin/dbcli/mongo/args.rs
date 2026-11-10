@@ -1,7 +1,7 @@
 use apicli::{Failure, Refused};
-use clap::{ArgAction, ColorChoice, Parser};
+use clap::{ColorChoice, Parser};
 
-use crate::call::engine_args;
+use crate::call::{Common, engine_args};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,76 +34,53 @@ pub struct MongoArgs {
     pub quiet: bool,
     #[arg(long, hide = true)]
     pub norc: bool,
-    #[arg(
-        long,
-        value_name = "SECONDS",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "30",
-        help = "Wait up to SECONDS (default 30) for the rate limit instead of failing"
-    )]
-    pub wait: Option<f64>,
     #[arg(hide = true)]
     pub extra: Vec<String>,
-    #[arg(long, action = ArgAction::Help, help = "Print help")]
-    help: Option<bool>,
+    #[command(flatten)]
+    pub common: Common,
 }
 
 const SERVER: &str = "the connection name picks the server";
 const AUTH: &str = "the connection URL sets the user and how to log in";
 const TLS: &str = "the connection URL sets TLS";
 
-const fn refused(
-    short: Option<char>,
-    long: &'static str,
-    value: bool,
-    reason: &'static str,
-) -> Refused {
-    Refused {
-        short,
-        long,
-        value,
-        reason,
-    }
-}
-
-pub const REFUSED: &[Refused] = &[
-    refused(None, "host", true, SERVER),
-    refused(None, "port", true, SERVER),
-    refused(Some('u'), "username", true, AUTH),
-    refused(
+const REFUSED: &[Refused] = &[
+    Refused::new(None, "host", true, SERVER),
+    Refused::new(None, "port", true, SERVER),
+    Refused::new(Some('u'), "username", true, AUTH),
+    Refused::new(
         Some('p'),
         "password",
         true,
         "dbcli sends the stored password itself",
     ),
-    refused(None, "authenticationDatabase", true, AUTH),
-    refused(None, "authenticationMechanism", true, AUTH),
-    refused(None, "awsIamSessionToken", true, AUTH),
-    refused(None, "gssapiServiceName", true, AUTH),
-    refused(None, "tls", false, TLS),
-    refused(None, "tlsCAFile", true, TLS),
-    refused(None, "tlsCertificateKeyFile", true, TLS),
-    refused(None, "tlsCertificateKeyFilePassword", true, TLS),
-    refused(None, "tlsAllowInvalidCertificates", false, TLS),
-    refused(None, "tlsAllowInvalidHostnames", false, TLS),
-    refused(None, "tlsUseSystemCA", false, TLS),
-    refused(None, "tlsCRLFile", true, TLS),
-    refused(None, "tlsDisabledProtocols", true, TLS),
-    refused(None, "tlsFIPSMode", false, TLS),
-    refused(
+    Refused::new(None, "authenticationDatabase", true, AUTH),
+    Refused::new(None, "authenticationMechanism", true, AUTH),
+    Refused::new(None, "awsIamSessionToken", true, AUTH),
+    Refused::new(None, "gssapiServiceName", true, AUTH),
+    Refused::new(None, "tls", false, TLS),
+    Refused::new(None, "tlsCAFile", true, TLS),
+    Refused::new(None, "tlsCertificateKeyFile", true, TLS),
+    Refused::new(None, "tlsCertificateKeyFilePassword", true, TLS),
+    Refused::new(None, "tlsAllowInvalidCertificates", false, TLS),
+    Refused::new(None, "tlsAllowInvalidHostnames", false, TLS),
+    Refused::new(None, "tlsUseSystemCA", false, TLS),
+    Refused::new(None, "tlsCRLFile", true, TLS),
+    Refused::new(None, "tlsDisabledProtocols", true, TLS),
+    Refused::new(None, "tlsFIPSMode", false, TLS),
+    Refused::new(
         Some('f'),
         "file",
         true,
         "scripts are not supported, pass each expression with --eval",
     ),
-    refused(
+    Refused::new(
         None,
         "nodb",
         false,
         "dbcli always connects to the named connection",
     ),
-    refused(None, "shell", false, "there is no interactive mode"),
+    Refused::new(None, "shell", false, "there is no interactive mode"),
 ];
 
 pub fn parse(args: &[String]) -> Result<MongoArgs, Failure> {

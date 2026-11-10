@@ -44,6 +44,10 @@ impl Redactor {
         self.drain(true)
     }
 
+    pub fn redact_str(&self, text: &str) -> String {
+        String::from_utf8_lossy(&self.redact(text.as_bytes())).into_owned()
+    }
+
     pub fn redact(&self, text: &[u8]) -> Vec<u8> {
         Redactor {
             mask: self.mask.clone(),

@@ -10,6 +10,14 @@ pub fn add_hint(name: &str) -> String {
     )
 }
 
+pub fn rotate_hint(name: &str) -> String {
+    format!("if the password changed, the user can run: dbcli secret rotate {name}")
+}
+
+pub fn write_hint(name: &str) -> String {
+    format!("to allow writes, the user can run: dbcli allow add {name} write")
+}
+
 pub fn unknown(name: &str) -> Failure {
     Failure::Usage(format!(
         "no connection named {name}, run dbcli connections to list them"

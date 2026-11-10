@@ -2,6 +2,8 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::DateTime;
 use mongodb::bson::{Binary, Bson, Document, Regex, spec::BinarySubtype};
 
+use crate::call::{hex, uuid};
+
 const BREAK: usize = 80;
 const COMPACT: usize = 3;
 const DEPTH: usize = 6;
@@ -351,31 +353,13 @@ fn iso(millis: i64) -> String {
 }
 
 fn binary_text(binary: &Binary) -> String {
-    match binary.subtype {
-        BinarySubtype::Uuid if binary.bytes.len() == 16 => {
-            let hex = binary
-                .bytes
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>();
-            format!(
-                "UUID('{}-{}-{}-{}-{}')",
-                &hex[..8],
-                &hex[8..12],
-                &hex[12..16],
-                &hex[16..20],
-                &hex[20..]
-            )
-        }
-        BinarySubtype::Md5 => format!(
-            "MD5('{}')",
-            binary
-                .bytes
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        ),
-        subtype => format!(
+    match (
+        binary.subtype,
+        <[u8; 16]>::try_from(binary.bytes.as_slice()),
+    ) {
+        (BinarySubtype::Uuid, Ok(bytes)) => format!("UUID('{}')", uuid(&bytes)),
+        (BinarySubtype::Md5, _) => format!("MD5('{}')", hex(&binary.bytes)),
+        (subtype, _) => format!(
             "Binary.createFromBase64('{}', {})",
             STANDARD.encode(&binary.bytes),
             u8::from(subtype)

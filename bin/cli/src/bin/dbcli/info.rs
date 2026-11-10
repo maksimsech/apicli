@@ -1,11 +1,10 @@
 use apicli::{Failure, now, print_json};
-use apicli_policy::{Connection, Engine};
+use apicli_policy::Connection;
 use apicli_vault::Store;
 use serde::Serialize;
 
 use crate::{
-    call::{self, find, key, redactor},
-    postgres,
+    call::{self, describe, find, key, mode, redactor, scrub},
     secret::add_hint,
 };
 
@@ -74,7 +73,10 @@ pub fn connections(json: bool) -> Result<u8, Failure> {
             }
             println!(
                 "  limit: {}",
-                limit_line(connection, remaining(&store, connection))
+                limit_line(
+                    connection.limits().to_string(),
+                    remaining(&store, connection)
+                )
             );
         }
     }
@@ -94,7 +96,6 @@ pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Fail
         remaining: None,
         reason: None,
     };
-    let mut text = Vec::new();
     let code = match find(&vault, name) {
         Ok(connection) => {
             explanation.url = Some(connection.url.to_string());
@@ -105,16 +106,10 @@ pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Fail
                     explanation.checks = checks;
                     explanation.limit = Some(connection.limits().to_string());
                     explanation.remaining = remaining(&store, connection);
-                    text.push(format!("allowed: {name} ({})", connection.url));
-                    text.extend(explanation.checks.iter().map(|line| format!("  {line}")));
-                    text.push(format!(
-                        "  limit: {}",
-                        limit_line(connection, explanation.remaining)
-                    ));
                     0
                 }
                 Err(failure) => {
-                    let failure = call::scrub(failure, &redactor(&vault));
+                    let failure = scrub(failure, &redactor(&vault));
                     explanation.reason = Some(failure.to_string());
                     failure.code()
                 }
@@ -130,27 +125,16 @@ pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Fail
     } else if let Some(reason) = &explanation.reason {
         println!("{reason}");
     } else {
-        println!("{}", text.join("\n"));
+        println!("allowed: {name} ({})", explanation.url.unwrap_or_default());
+        for check in &explanation.checks {
+            println!("  {check}");
+        }
+        println!(
+            "  limit: {}",
+            limit_line(explanation.limit.unwrap_or_default(), explanation.remaining)
+        );
     }
     Ok(code)
-}
-
-fn mode(connection: &Connection) -> &'static str {
-    match connection.url.engine {
-        Engine::Postgres | Engine::ClickHouse => postgres::mode(connection),
-        _ if connection.allow.is_empty() => "read-only",
-        _ => "rules",
-    }
-}
-
-fn describe(connection: &Connection) -> &'static str {
-    match connection.url.engine {
-        Engine::Postgres => postgres::describe(connection),
-        Engine::ClickHouse if connection.write => "read-write, each statement commits",
-        Engine::ClickHouse => "read-only, the server runs each statement with readonly=1",
-        _ if connection.allow.is_empty() => "read-only, other commands need an allow rule",
-        _ => "reads, plus what the allow rules below match",
-    }
 }
 
 fn remaining(store: &Store, connection: &Connection) -> Option<u32> {
@@ -162,9 +146,9 @@ fn remaining(store: &Store, connection: &Connection) -> Option<u32> {
         .remaining(&connection.limits(), now())
 }
 
-fn limit_line(connection: &Connection, remaining: Option<u32>) -> String {
+fn limit_line(limit: String, remaining: Option<u32>) -> String {
     match remaining {
-        Some(remaining) => format!("{}, {remaining} left now", connection.limits()),
-        None => connection.limits().to_string(),
+        Some(remaining) => format!("{limit}, {remaining} left now"),
+        None => limit,
     }
 }
