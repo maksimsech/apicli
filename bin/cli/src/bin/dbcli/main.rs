@@ -3,11 +3,10 @@ mod bypass;
 mod call;
 mod cli;
 mod info;
-mod meta;
-mod output;
 mod postgres;
 mod rules;
 mod secret;
+mod tls;
 
 use std::{env, process::ExitCode};
 
@@ -27,7 +26,7 @@ async fn run() -> Result<u8, Failure> {
     let cli = parse(env::args().collect())?;
     match cli.command {
         Some(Command::Connections { json }) => info::connections(json),
-        Some(Command::Explain { run, json }) => info::explain(&run, json),
+        Some(Command::Explain { json, name, args }) => info::explain(&name, &args, json).await,
         Some(Command::Secret { command }) => secret::secret(command),
         Some(Command::Allow { command }) => rules::allow(command),
         Some(Command::Limit { command }) => rules::limit(command),
@@ -42,6 +41,6 @@ async fn run() -> Result<u8, Failure> {
         }) => log(tail, json),
         Some(Command::Password { command }) => password(TOOL, command),
         Some(Command::Skill { command }) => skill(TOOL, SKILL, command),
-        None => call::send(cli.run).await,
+        None => call::send(&cli.name.unwrap_or_default(), &cli.args).await,
     }
 }

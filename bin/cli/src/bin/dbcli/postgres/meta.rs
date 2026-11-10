@@ -3,9 +3,9 @@ use std::mem::take;
 use apicli::Failure;
 use apicli_policy::Connection;
 
-use crate::{
+use super::{
+    client::Session,
     output::{Column, Table},
-    postgres::Session,
 };
 
 const TEXT: u32 = 25;

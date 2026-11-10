@@ -1,11 +1,11 @@
 use apicli::{Failure, now, print_json};
-use apicli_policy::Connection;
+use apicli_policy::{Connection, Engine};
 use apicli_vault::Store;
 use serde::Serialize;
 
 use crate::{
-    call::{find, key, mode, steps},
-    cli::RunArgs,
+    call::{self, find, key, redactor},
+    postgres,
     secret::add_hint,
 };
 
@@ -13,7 +13,10 @@ use crate::{
 struct Listed {
     name: String,
     url: String,
+    engine: &'static str,
     mode: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    allow: Vec<String>,
     limit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     remaining: Option<u32>,
@@ -26,9 +29,9 @@ struct Explanation {
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    mode: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    statements: Option<usize>,
+    engine: Option<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    checks: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     limit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,65 +43,82 @@ struct Explanation {
 pub fn connections(json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
-    let listed = vault
-        .connections
-        .iter()
-        .map(|connection| Listed {
-            name: connection.name.clone(),
-            url: connection.url.to_string(),
-            mode: mode(connection),
-            limit: connection.limits().to_string(),
-            remaining: remaining(&store, connection),
-        })
-        .collect::<Vec<_>>();
     if json {
+        let listed = vault
+            .connections
+            .iter()
+            .map(|connection| Listed {
+                name: connection.name.clone(),
+                url: connection.url.to_string(),
+                engine: connection.url.engine.name(),
+                mode: mode(connection),
+                allow: connection.allow.iter().map(ToString::to_string).collect(),
+                limit: connection.limits().to_string(),
+                remaining: remaining(&store, connection),
+            })
+            .collect::<Vec<_>>();
         print_json(&listed)?;
-    } else if listed.is_empty() {
+    } else if vault.connections.is_empty() {
         println!(
             "No connections are configured. The user can add one with: {}",
             add_hint("NAME")
         );
     } else {
-        for connection in listed {
+        for connection in &vault.connections {
             println!("{}", connection.name);
             println!("  url: {}", connection.url);
-            println!("  mode: {}", describe(connection.mode));
+            println!("  engine: {}", connection.url.engine.name());
+            println!("  mode: {}", describe(connection));
+            for rule in &connection.allow {
+                println!("  allow: {rule}");
+            }
             println!(
                 "  limit: {}",
-                limit_line(&connection.limit, connection.remaining)
+                limit_line(connection, remaining(&store, connection))
             );
         }
     }
     Ok(0)
 }
 
-pub fn explain(args: &RunArgs, json: bool) -> Result<u8, Failure> {
+pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
-    let name = args.name.clone().unwrap_or_default();
     let mut explanation = Explanation {
         allowed: false,
-        connection: name.clone(),
+        connection: name.to_string(),
         url: None,
-        mode: None,
-        statements: None,
+        engine: None,
+        checks: Vec::new(),
         limit: None,
         remaining: None,
         reason: None,
     };
-    let checked = args
-        .check()
-        .and_then(|_| steps(args))
-        .and_then(|steps| find(&vault, &name).map(|connection| (connection, steps.len())));
-    let code = match checked {
-        Ok((connection, count)) => {
-            explanation.allowed = true;
+    let mut text = Vec::new();
+    let code = match find(&vault, name) {
+        Ok(connection) => {
             explanation.url = Some(connection.url.to_string());
-            explanation.mode = Some(mode(connection));
-            explanation.statements = Some(count);
-            explanation.limit = Some(connection.limits().to_string());
-            explanation.remaining = remaining(&store, connection);
-            0
+            explanation.engine = Some(connection.url.engine.name());
+            match call::explain(connection, args).await {
+                Ok(checks) => {
+                    explanation.allowed = true;
+                    explanation.checks = checks;
+                    explanation.limit = Some(connection.limits().to_string());
+                    explanation.remaining = remaining(&store, connection);
+                    text.push(format!("allowed: {name} ({})", connection.url));
+                    text.extend(explanation.checks.iter().map(|line| format!("  {line}")));
+                    text.push(format!(
+                        "  limit: {}",
+                        limit_line(connection, explanation.remaining)
+                    ));
+                    0
+                }
+                Err(failure) => {
+                    let failure = call::scrub(failure, &redactor(&vault));
+                    explanation.reason = Some(failure.to_string());
+                    failure.code()
+                }
+            }
         }
         Err(failure) => {
             explanation.reason = Some(failure.to_string());
@@ -107,28 +127,28 @@ pub fn explain(args: &RunArgs, json: bool) -> Result<u8, Failure> {
     };
     if json {
         print_json(&explanation)?;
-    } else if explanation.allowed {
-        println!("allowed: {name} ({})", explanation.url.unwrap_or_default());
-        println!(
-            "  statements: {}",
-            explanation.statements.unwrap_or_default()
-        );
-        let mode = explanation.mode.unwrap_or_default();
-        println!("  mode: {}", describe(mode));
-        if mode == "read-only" {
-            println!("  to allow writes, the user can run: dbcli allow add {name} write");
-        }
-        println!(
-            "  limit: {}",
-            limit_line(
-                &explanation.limit.unwrap_or_default(),
-                explanation.remaining
-            )
-        );
+    } else if let Some(reason) = &explanation.reason {
+        println!("{reason}");
     } else {
-        println!("{}", explanation.reason.unwrap_or_default());
+        println!("{}", text.join("\n"));
     }
     Ok(code)
+}
+
+fn mode(connection: &Connection) -> &'static str {
+    match connection.url.engine {
+        Engine::Postgres => postgres::mode(connection),
+        _ if connection.allow.is_empty() => "read-only",
+        _ => "rules",
+    }
+}
+
+fn describe(connection: &Connection) -> &'static str {
+    match connection.url.engine {
+        Engine::Postgres => postgres::describe(connection),
+        _ if connection.allow.is_empty() => "read-only, other commands need an allow rule",
+        _ => "reads, plus what the allow rules below match",
+    }
 }
 
 fn remaining(store: &Store, connection: &Connection) -> Option<u32> {
@@ -140,17 +160,9 @@ fn remaining(store: &Store, connection: &Connection) -> Option<u32> {
         .remaining(&connection.limits(), now())
 }
 
-fn describe(mode: &str) -> &'static str {
-    if mode == "read-write" {
-        "read-write, each statement commits"
-    } else {
-        "read-only, each statement runs in a read-only transaction"
-    }
-}
-
-fn limit_line(limit: &str, remaining: Option<u32>) -> String {
+fn limit_line(connection: &Connection, remaining: Option<u32>) -> String {
     match remaining {
-        Some(remaining) => format!("{limit}, {remaining} left now"),
-        None => limit.to_string(),
+        Some(remaining) => format!("{}, {remaining} left now", connection.limits()),
+        None => connection.limits().to_string(),
     }
 }

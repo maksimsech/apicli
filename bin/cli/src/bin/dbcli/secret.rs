@@ -5,7 +5,9 @@ use secrecy::{ExposeSecret, SecretString};
 use crate::cli::{SecretCommand, reserved};
 
 pub fn add_hint(name: &str) -> String {
-    format!("dbcli secret add {name} --url 'postgres://USER@HOST:5432/DATABASE'")
+    format!(
+        "dbcli secret add {name} --url 'postgres://USER@HOST:5432/DATABASE' (or a redis://USER@HOST:6379/0 or mongodb://USER@HOST:27017/DATABASE URL)"
+    )
 }
 
 pub fn unknown(name: &str) -> Failure {
@@ -27,15 +29,7 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
             }
             let password = prompt(&name)?;
             let message = format!("Added {name} for {url}, read-only");
-            vault.connections.push(Connection {
-                name,
-                url,
-                password,
-                write: false,
-                rate: None,
-                burst: None,
-                daily: None,
-            });
+            vault.connections.push(Connection::new(name, url, password));
             message
         }
         SecretCommand::Rotate { name } => {
