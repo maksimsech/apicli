@@ -3,6 +3,7 @@ mod bypass;
 mod call;
 mod cassandra;
 mod cli;
+mod clickhouse;
 mod info;
 mod mongo;
 mod postgres;

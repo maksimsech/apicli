@@ -15,6 +15,7 @@ pub struct Lexed {
 pub struct Statement {
     pub text: String,
     pub line: usize,
+    pub terminated: bool,
 }
 
 pub fn tokens(text: &str, backslash: bool) -> Vec<Lexed> {
@@ -163,11 +164,11 @@ pub fn split(text: &str, backslash: bool, batches: bool) -> Vec<Statement> {
             && !batch
             && let Some(start) = first.take()
         {
-            statements.push(piece(text, &tokens[start..index]));
+            statements.push(piece(text, &tokens[start..index], true));
         }
     }
     if let Some(start) = first {
-        statements.push(piece(text, &tokens[start..]));
+        statements.push(piece(text, &tokens[start..], false));
     }
     statements
 }
@@ -176,12 +177,13 @@ pub fn word(token: &Token, expected: &str) -> bool {
     matches!(token, Token::Word(word) if word.eq_ignore_ascii_case(expected))
 }
 
-fn piece(text: &str, tokens: &[Lexed]) -> Statement {
+fn piece(text: &str, tokens: &[Lexed], terminated: bool) -> Statement {
     let start = tokens.first().map_or(0, |lexed| lexed.start);
     let end = tokens.last().map_or(start, |lexed| lexed.end);
     Statement {
         text: text[start..end].to_string(),
         line: text[..start].matches('\n').count() + 1,
+        terminated,
     }
 }
 

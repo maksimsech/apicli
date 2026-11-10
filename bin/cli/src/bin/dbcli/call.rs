@@ -9,7 +9,7 @@ use apicli_policy::{Connection, Engine, Redactor, Vault};
 use apicli_vault::Store;
 use clap::{Parser, parser::ValueSource};
 
-use crate::{cassandra, mongo, postgres, redis, secret::add_hint};
+use crate::{cassandra, clickhouse, mongo, postgres, redis, secret::add_hint};
 
 const MASK: &str = "[dbcli:redacted]";
 
@@ -112,7 +112,7 @@ pub async fn perform(
         Engine::Redis => redis::run(connection, args, context).await,
         Engine::Mongo => mongo::run(connection, args, context).await,
         Engine::Cassandra => cassandra::run(connection, args, context).await,
-        Engine::ClickHouse => Err(Failure::Usage("ClickHouse is not supported yet".into())),
+        Engine::ClickHouse => clickhouse::run(connection, args, context).await,
     };
     result.map_err(|failure| scrub(failure, &context.redactor))
 }
@@ -123,7 +123,7 @@ pub async fn explain(connection: &Connection, args: &[String]) -> Result<Vec<Str
         Engine::Redis => redis::explain(connection, args).await,
         Engine::Mongo => mongo::explain(connection, args),
         Engine::Cassandra => cassandra::explain(connection, args),
-        Engine::ClickHouse => Err(Failure::Usage("ClickHouse is not supported yet".into())),
+        Engine::ClickHouse => clickhouse::explain(connection, args),
     }
 }
 

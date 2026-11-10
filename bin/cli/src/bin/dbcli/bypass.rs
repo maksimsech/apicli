@@ -1,4 +1,5 @@
 mod cassandra;
+mod clickhouse;
 mod mongo;
 mod postgres;
 mod redis;
