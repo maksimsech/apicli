@@ -4,7 +4,7 @@ curl for APIs that need credentials, built for coding agents.
 
 apicli adds the API key for each host itself, so your agent can call real APIs without ever seeing the key. Requests are read-only by default, writes are allowed per path, and each host can have a rate limit.
 
-The same install gives you [dbcli](#dbcli), which does the same for PostgreSQL.
+The same install gives you [dbcli](#dbcli), which does the same for PostgreSQL, Redis and MongoDB.
 
 ## Install
 
@@ -52,25 +52,43 @@ apicli log
 
 ## dbcli
 
-psql for databases that need credentials. It works with PostgreSQL for now, and shares apicli's vault, admin password and log.
+psql, redis-cli and mongosh for databases that need credentials. It shares apicli's vault, admin password and log.
 
 ```sh
 dbcli secret add prod-pg --url 'postgres://agent@db.example.com:5432/app?sslmode=require'
+dbcli secret add cache --url 'rediss://agent@cache.example.com:6380/0'
+dbcli secret add shop --url 'mongodb://agent@db.example.com:27017/shop?authSource=admin'
 dbcli skill install --agent claude
-dbcli prod-pg -c 'select id, email from users limit 5' -c '\d users'
 dbcli connections
 ```
 
-You type the password at a prompt. TLS certificates are always verified, add `sslrootcert=PATH` to the URL for a private CA.
+You type the password at a prompt. TLS certificates are always verified. For a private CA, add `sslrootcert=PATH`, `cacert=PATH` or `tlsCAFile=PATH` to the URL.
 
-Connections are read-only: each statement runs in its own read-only transaction, so Postgres itself rejects writes. Writes and limits are opt-in:
+After the connection name come the engine's own flags. `dbcli NAME --help` lists them.
+
+```sh
+dbcli prod-pg -c 'select id, email from users limit 5' -c '\d users'
+dbcli cache GET session:42
+dbcli shop --eval 'db.orders.find({status: "paid"}).limit(5)'
+```
+
+Connections are read-only by default:
+
+- Postgres runs each statement in its own read-only transaction, so Postgres itself rejects writes.
+- Redis runs the commands the server marks read-only, except dangerous and scripting ones like KEYS and EVAL_RO.
+- MongoDB runs finds, counts, listings and aggregations without `$out` or `$merge`. dbcli parses mongosh expressions itself and never runs JavaScript.
+
+Writes and limits are opt-in:
 
 ```sh
 dbcli allow add prod-pg write
+dbcli allow add cache SET 'cache:*'     # every key the command touches must match
+dbcli allow add cache 'CONFIG|GET'      # a command without keys takes no glob
+dbcli allow add shop insert 'shop.*'    # a command and a namespace glob
 dbcli limit set prod-pg 30/min
 ```
 
-For limits on tables, give the connection a database user with only the grants it needs. `dbcli --help` lists every command.
+For limits on Postgres tables, give the connection a database user with only the grants it needs. `dbcli --help` lists every command.
 
 ## What it protects
 

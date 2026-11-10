@@ -1,6 +1,6 @@
 ## Project Context
 
-apicli is a curl-compatible Rust CLI for coding agents. It adds per-host API credentials the agent never sees, enforces method and path rules, and rate limits per host. dbcli is its psql-compatible sibling for PostgreSQL: named connections with stored passwords, read-only transactions by default, and per-connection rate limits.
+apicli is a curl-compatible Rust CLI for coding agents. It adds per-host API credentials the agent never sees, enforces method and path rules, and rate limits per host. dbcli is its sibling for databases, compatible with psql, redis-cli and mongosh: named connections with stored passwords, read-only by default with per-command allow rules for Redis and MongoDB, and per-connection rate limits. Each engine lives in its own module under `src/bin/dbcli`.
 
 Both binaries come from the package in `bin/cli`: `src/bin/apicli`, `src/bin/dbcli`, and shared code in `src/lib.rs`. Rules, connections and redaction live in `crates/policy`, storage in `crates/vault`. `bin/cli/skill/apicli/SKILL.md` and `bin/cli/skill/dbcli/SKILL.md` are compiled into the binaries and must match their behavior.
 
@@ -14,9 +14,9 @@ Import types and functions with `use` and refer to their short names.
 
 ## Test
 
-Write tests only for security-critical code: refused flags, the one-URL rule, URL normalization, host binding, redirects, redaction, method overrides, proxies and rate limits, and for dbcli refused flags and backslash commands, connection URLs, the one-statement rule and read-only transactions. Do not add other tests unless asked.
+Write tests only for security-critical code: refused flags, the one-URL rule, URL normalization, host binding, redirects, redaction, method overrides, proxies and rate limits, and for dbcli refused flags, backslash commands and Redis commands, connection URLs, the one-statement rule, read-only transactions, command classification and allow rules, and refusing JavaScript in MongoDB expressions. Do not add other tests unless asked.
 
-The bypass suites are `bin/cli/src/bin/apicli/bypass.rs` and `bin/cli/src/bin/dbcli/bypass.rs`. They run each pipeline with test vaults and `Store::at` temp directories, apicli against local servers and dbcli against the Postgres in `DBCLI_TEST_POSTGRES`, a URL with the password in it. Without it the dbcli server tests skip. Tests must never touch apicli's data directory.
+The bypass suites are `bin/cli/src/bin/apicli/bypass.rs` and `bin/cli/src/bin/dbcli/bypass/`, one file per engine. They run each pipeline with test vaults and `Store::at` temp directories, apicli against local servers and dbcli against the servers in `DBCLI_TEST_POSTGRES`, `DBCLI_TEST_REDIS` and `DBCLI_TEST_MONGO`, URLs with the password in them. Without one, that engine's server tests skip. Tests must never touch apicli's data directory.
 
 ## Docs
 
