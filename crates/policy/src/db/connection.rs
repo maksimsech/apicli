@@ -1,13 +1,30 @@
+use std::fmt;
+
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
-use super::{Allow, ConnectionUrl};
 use crate::{Limits, Rate, secret::expose};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Allow {
+    pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+impl fmt::Display for Allow {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match &self.target {
+            Some(target) => write!(formatter, "{} {target}", self.action),
+            None => write!(formatter, "{}", self.action),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Connection {
     pub name: String,
-    pub url: ConnectionUrl,
+    pub url: String,
     #[serde(serialize_with = "expose")]
     pub password: SecretString,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -27,7 +44,7 @@ fn is_false(value: &bool) -> bool {
 }
 
 impl Connection {
-    pub fn new(name: String, url: ConnectionUrl, password: SecretString) -> Connection {
+    pub fn new(name: String, url: String, password: SecretString) -> Connection {
         Connection {
             name,
             url,

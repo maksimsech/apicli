@@ -1,4 +1,4 @@
-use apicli_policy::{ConnectionUrl, Vault};
+use apicli_policy::Vault;
 use apicli_vault::Store;
 use secrecy::SecretString;
 
@@ -38,7 +38,7 @@ async fn count(table: &str, writer: &Vault, store: &Store) -> String {
 #[tokio::test(flavor = "current_thread")]
 async fn refused_flags_never_connect() {
     let offline = Server {
-        url: ConnectionUrl::parse("clickhouse://agent@127.0.0.1:1/default").unwrap(),
+        url: "clickhouse://agent@127.0.0.1:1/default".into(),
         password: "never-sent-123".into(),
     };
     let writer = vault(&offline, writes);

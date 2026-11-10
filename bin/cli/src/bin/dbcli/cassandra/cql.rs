@@ -1,6 +1,7 @@
 use apicli::Failure;
 use apicli_policy::Connection;
 
+use super::rules::find;
 use crate::shared::{Dialect, Statement, Token, not_allowed, quote, split, tokens, word};
 
 const LOCAL_FILES: &str = "it reads or writes local files";
@@ -119,7 +120,7 @@ fn classify(
             )
         }
         _ if !WRITES.contains(&keyword.as_str()) => {
-            let rule = connection.rule(&keyword, &[]).ok_or_else(|| {
+            let rule = find(&connection.allow, &keyword, None).ok_or_else(|| {
                 Failure::Denied(format!(
                     "denied: {keyword} is not a CQL statement dbcli knows, check the spelling\nif it is right, the user can allow it with: dbcli allow add {} {}",
                     connection.name,
@@ -252,8 +253,7 @@ fn identifier(token: Option<&Token>) -> Option<String> {
 }
 
 fn allowed(connection: &Connection, action: &str, target: Option<&str>) -> Result<String, Failure> {
-    let targets = target.map(str::as_bytes).into_iter().collect::<Vec<_>>();
-    match connection.rule(action, &targets) {
+    match find(&connection.allow, action, target) {
         Some(rule) => Ok(rule.to_string()),
         None => Err(not_allowed(connection, "reads", action, target, target)),
     }

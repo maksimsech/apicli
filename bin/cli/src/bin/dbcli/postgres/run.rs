@@ -7,7 +7,7 @@ use super::{
     meta::{self, Meta},
     output::{Options, Table, render},
 };
-use crate::shared::{Context, mode, read_only, writes};
+use crate::shared::{COMMITS, ConnectionUrl, Context, flag, read_only, writes};
 
 const TAGGED: [&str; 4] = ["INSERT", "UPDATE", "DELETE", "MERGE"];
 
@@ -18,6 +18,7 @@ enum Step {
 
 pub async fn run(
     connection: &Connection,
+    url: &ConnectionUrl,
     args: &[String],
     context: &mut Context<'_>,
 ) -> Result<u8, Failure> {
@@ -25,9 +26,9 @@ pub async fn run(
     context.statements(&args.commands);
     let options = args.check()?;
     let steps = steps(&args)?;
-    context.entry.rule = Some(mode(connection).into());
+    context.entry.rule = Some(flag(connection).into());
     context.take(connection, args.common.wait)?;
-    let mut session = Session::open(connection).await?;
+    let mut session = Session::open(connection, url).await?;
     let mut result = Ok(0);
     for (index, step) in steps.iter().enumerate() {
         if index > 0
@@ -36,7 +37,8 @@ pub async fn run(
             result = Err(failure);
             break;
         }
-        if let Err(failure) = run_step(&mut session, step, connection, &options, context).await {
+        if let Err(failure) = run_step(&mut session, step, connection, url, &options, context).await
+        {
             result = Err(failure);
             break;
         }
@@ -48,13 +50,26 @@ pub async fn run(
 pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, Failure> {
     let args = parse(args)?;
     args.check()?;
-    Ok(writes(connection, steps(&args)?.len()))
+    Ok(writes(
+        connection,
+        steps(&args)?.len(),
+        describe(connection),
+    ))
+}
+
+pub fn describe(connection: &Connection) -> &'static str {
+    if connection.write {
+        COMMITS
+    } else {
+        "read-only, each statement runs in a read-only transaction"
+    }
 }
 
 async fn run_step(
     session: &mut Session,
     step: &Step,
     connection: &Connection,
+    url: &ConnectionUrl,
     options: &Options,
     context: &mut Context<'_>,
 ) -> Result<(), Failure> {
@@ -69,7 +84,7 @@ async fn run_step(
             context.print(&reply_text(reply, options))
         }
         Step::Meta(meta) => {
-            let shown = meta::run(session, meta, connection).await;
+            let shown = meta::run(session, meta, url).await;
             notices(session, context)?;
             let shown = shown?;
             if let Some(message) = shown.message {

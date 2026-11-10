@@ -7,8 +7,9 @@ use super::{
     args::{RedisArgs, parse},
     client::Client,
     reply::{Mode, Reply, format, lossy, repr},
+    rules::find,
 };
-use crate::shared::{Context, not_allowed, quote};
+use crate::shared::{ConnectionUrl, Context, not_allowed, quote};
 
 const READS: [&str; 2] = ["PING", "INFO"];
 
@@ -20,6 +21,7 @@ struct Verdict {
 
 pub async fn run(
     connection: &Connection,
+    url: &ConnectionUrl,
     args: &[String],
     context: &mut Context<'_>,
 ) -> Result<u8, Failure> {
@@ -34,7 +36,7 @@ pub async fn run(
         words.push(input);
     }
     context.take(connection, args.common.wait)?;
-    let mut client = Client::open(connection, db(connection, &args)).await?;
+    let mut client = Client::open(connection, url, db(url, &args)).await?;
     let result = if args.scan {
         scan(&mut client, &args, context).await
     } else {
@@ -44,7 +46,11 @@ pub async fn run(
     result
 }
 
-pub async fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, Failure> {
+pub async fn explain(
+    connection: &Connection,
+    url: &ConnectionUrl,
+    args: &[String],
+) -> Result<Vec<String>, Failure> {
     let args = parse(args)?;
     if args.scan {
         return Ok(vec!["command: SCAN, a read command".into()]);
@@ -53,7 +59,7 @@ pub async fn explain(connection: &Connection, args: &[String]) -> Result<Vec<Str
     if args.stdin {
         words.push(b"STDIN".to_vec());
     }
-    let mut client = Client::open(connection, db(connection, &args)).await?;
+    let mut client = Client::open(connection, url, db(url, &args)).await?;
     let verdict = classify(&mut client, connection, &words).await;
     client.close().await;
     let verdict = verdict?;
@@ -150,7 +156,7 @@ async fn classify(
             _ => {}
         }
     }
-    match connection.rule(&action, &refs(&keys)) {
+    match find(&connection.allow, &action, &refs(&keys)) {
         Some(rule) => Ok(Verdict {
             rule: Some(rule.to_string()),
             action,
@@ -302,9 +308,8 @@ fn statement(args: &RedisArgs) -> String {
     }
 }
 
-fn db(connection: &Connection, args: &RedisArgs) -> u32 {
-    args.db
-        .unwrap_or_else(|| connection.url.database.parse().unwrap_or(0))
+fn db(url: &ConnectionUrl, args: &RedisArgs) -> u32 {
+    args.db.unwrap_or_else(|| url.database.parse().unwrap_or(0))
 }
 
 fn mode(args: &RedisArgs, terminal: bool) -> Mode {

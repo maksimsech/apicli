@@ -7,6 +7,7 @@ use mongodb::bson::{Bson, Document, doc, oid::ObjectId};
 use super::{
     inspect::js_number,
     parse::{Segment, Statement},
+    rules::find,
 };
 use crate::shared::not_allowed;
 
@@ -558,7 +559,7 @@ pub fn check(connection: &Connection, step: &Step) -> Result<Verdict, Failure> {
             rule: None,
         });
     }
-    match connection.rule(&action, &[namespace.as_bytes()]) {
+    match find(&connection.allow, &action, &namespace) {
         Some(rule) => Ok(Verdict {
             rule: Some(rule.to_string()),
             action,

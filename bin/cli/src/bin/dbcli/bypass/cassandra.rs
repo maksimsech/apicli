@@ -1,4 +1,4 @@
-use apicli_policy::{ConnectionUrl, Vault};
+use apicli_policy::Vault;
 use apicli_vault::Store;
 use secrecy::SecretString;
 
@@ -47,7 +47,7 @@ async fn count(table: &str, vault: &Vault, store: &Store) -> usize {
 #[tokio::test(flavor = "current_thread")]
 async fn refused_flags_and_cqlsh_commands_never_connect() {
     let offline = Server {
-        url: ConnectionUrl::parse("cassandra://agent@127.0.0.1:1").unwrap(),
+        url: "cassandra://agent@127.0.0.1:1".into(),
         password: "never-sent-123".into(),
     };
     let writer = vault(&offline, allow(&[("INSERT", Some("*")), ("SELEC", None)]));

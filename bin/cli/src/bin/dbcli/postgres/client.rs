@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, io, time::Duration};
 
 use apicli::Failure;
-use apicli_policy::{Connection, Tls};
+use apicli_policy::Connection;
 use bytes::BytesMut;
 use fallible_iterator::FallibleIterator;
 use postgres_protocol::{
@@ -23,7 +23,7 @@ use tokio::{
 use unicode_width::UnicodeWidthStr;
 
 use super::output::Column;
-use crate::shared::{Io, dial, lost, rotate_hint, secure};
+use crate::shared::{ConnectionUrl, Io, Tls, dial, lost, rotate_hint, secure};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STATEMENT_TIMEOUT: &str = "60s";
@@ -62,14 +62,13 @@ pub struct Session {
 }
 
 impl Session {
-    pub async fn open(connection: &Connection) -> Result<Session, Failure> {
-        timeout(CONNECT_TIMEOUT, Session::start(connection))
+    pub async fn open(connection: &Connection, url: &ConnectionUrl) -> Result<Session, Failure> {
+        timeout(CONNECT_TIMEOUT, Session::start(connection, url))
             .await
             .map_err(|_| Failure::Timeout)?
     }
 
-    async fn start(connection: &Connection) -> Result<Session, Failure> {
-        let url = &connection.url;
+    async fn start(connection: &Connection, url: &ConnectionUrl) -> Result<Session, Failure> {
         let mut stream = dial(&url.host, url.port).await?;
         let mut tls = false;
         let io: Box<dyn Io> = if url.tls == Tls::Disable {
@@ -119,12 +118,15 @@ impl Session {
             parameters: BTreeMap::new(),
             notices: Vec::new(),
         };
-        session.startup(connection).await?;
+        session.startup(connection, url).await?;
         Ok(session)
     }
 
-    async fn startup(&mut self, connection: &Connection) -> Result<(), Failure> {
-        let url = &connection.url;
+    async fn startup(
+        &mut self,
+        connection: &Connection,
+        url: &ConnectionUrl,
+    ) -> Result<(), Failure> {
         let mut parameters = vec![
             ("user", url.user.as_str()),
             ("database", url.database.as_str()),

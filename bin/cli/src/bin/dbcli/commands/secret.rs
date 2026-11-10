@@ -1,8 +1,11 @@
 use apicli::{Failure, finish, open_for_change, read_secret};
-use apicli_policy::{Connection, ConnectionUrl};
+use apicli_policy::Connection;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::cli::{SecretCommand, reserved};
+use crate::{
+    call::parse,
+    cli::{SecretCommand, reserved},
+};
 
 pub fn unknown(name: &str) -> Failure {
     Failure::Usage(format!(
@@ -15,7 +18,7 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
     let message = match command {
         SecretCommand::Add { name, url } => {
             validate(&name)?;
-            let url = ConnectionUrl::parse(&url).map_err(Failure::Usage)?;
+            let url = parse(&url).map_err(Failure::Usage)?.text;
             if vault.connection(&name).is_some() {
                 return Err(Failure::Usage(format!(
                     "{name} already exists, use dbcli secret rotate {name}"

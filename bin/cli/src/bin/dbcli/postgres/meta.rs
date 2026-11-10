@@ -1,12 +1,12 @@
 use std::mem::take;
 
 use apicli::Failure;
-use apicli_policy::Connection;
 
 use super::{
     client::Session,
     output::{Column, Table},
 };
+use crate::shared::ConnectionUrl;
 
 const TEXT: u32 = 25;
 const SUPPORTED: &str =
@@ -117,7 +117,7 @@ pub fn parse(text: &str) -> Result<Meta, Failure> {
 pub async fn run(
     session: &mut Session,
     meta: &Meta,
-    connection: &Connection,
+    url: &ConnectionUrl,
 ) -> Result<Shown, Failure> {
     let table = match meta {
         Meta::Relations {
@@ -185,7 +185,7 @@ pub async fn run(
             );
             listing(session, &sql, "List of roles", false).await?
         }
-        Meta::Conninfo => conninfo(session, connection),
+        Meta::Conninfo => conninfo(session, url),
     };
     Ok(Shown {
         tables: vec![table],
@@ -437,8 +437,7 @@ async fn tablespace(session: &mut Session, oid: u64) -> Result<Vec<String>, Fail
     .await
 }
 
-fn conninfo(session: &Session, connection: &Connection) -> Table {
-    let url = &connection.url;
+fn conninfo(session: &Session, url: &ConnectionUrl) -> Table {
     let parameter = |name: &str| session.parameters.get(name).cloned().unwrap_or_default();
     let rows = [
         ("Database", url.database.clone()),

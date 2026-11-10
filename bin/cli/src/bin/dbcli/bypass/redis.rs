@@ -1,4 +1,3 @@
-use apicli_policy::ConnectionUrl;
 use secrecy::SecretString;
 
 use super::{Server, allow, limited, run, server, store, vault};
@@ -10,7 +9,7 @@ fn redis() -> Option<Server> {
 #[tokio::test(flavor = "current_thread")]
 async fn refused_flags_and_commands_never_connect() {
     let offline = Server {
-        url: ConnectionUrl::parse("redis://127.0.0.1:1/0").unwrap(),
+        url: "redis://127.0.0.1:1/0".into(),
         password: "never-sent-123".into(),
     };
     let reader = vault(&offline, allow(&[("SET", Some("*"))]));

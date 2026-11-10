@@ -2,7 +2,10 @@ use apicli::{Failure, finish, open_for_change};
 use apicli_policy::Rate;
 
 use super::secret::unknown;
-use crate::cli::{AllowCommand, LimitCommand};
+use crate::{
+    call::Engine,
+    cli::{AllowCommand, LimitCommand},
+};
 
 pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("dbcli")?;
@@ -19,12 +22,11 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
         } => (name, action, target, false),
     };
     let connection = vault.connection_mut(&name).ok_or_else(|| unknown(&name))?;
-    let message = if connection.url.engine.write_flag() {
+    let engine = Engine::of(&connection.url).map_err(Failure::Integrity)?;
+    let rule = engine.rule(&name, &action, target.as_deref());
+    let message = if engine.write_flag() {
         if !action.eq_ignore_ascii_case("write") || target.is_some() {
-            return Err(Failure::Usage(format!(
-                "{} connections take only `dbcli allow add {name} write`, limits on tables belong in GRANTs",
-                connection.url.engine.name()
-            )));
+            return Err(Failure::Usage(rule.err().unwrap_or_default()));
         }
         if !add && !connection.write {
             return Err(Failure::Usage(format!("{name} does not allow writes")));
@@ -36,9 +38,7 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
             format!("Removed writes on {name}, it is read-only again")
         }
     } else {
-        let rule = connection
-            .check_rule(&action, target.as_deref())
-            .map_err(Failure::Usage)?;
+        let rule = rule.map_err(Failure::Usage)?;
         let found = connection.allow.iter().position(|existing| {
             existing.action.eq_ignore_ascii_case(&rule.action) && existing.target == rule.target
         });

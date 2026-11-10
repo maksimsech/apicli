@@ -16,7 +16,7 @@ use super::{
     parse::parse,
     plan::{Bulked, Plan, Shape, Step, check, plan},
 };
-use crate::shared::{Context, rotate_hint, summary};
+use crate::shared::{ConnectionUrl, Context, rotate_hint, summary};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const BATCH: usize = 20;
@@ -30,19 +30,20 @@ enum Output {
 
 pub async fn run(
     connection: &Connection,
+    url: &ConnectionUrl,
     args: &[String],
     context: &mut Context<'_>,
 ) -> Result<u8, Failure> {
     let args = arguments(args)?;
     context.statements(&args.eval);
-    let plans = plans(connection, &args.eval)?;
+    let plans = plans(url, &args.eval)?;
     let rules = plans
         .iter()
         .flat_map(|plan| &plan.steps)
         .map(|step| check(connection, step).map(|verdict| verdict.rule))
         .collect::<Result<Vec<_>, _>>()?;
     context.entry.rule = Some(summary(rules));
-    let client = connect(connection).await?;
+    let client = connect(connection, url).await?;
     let mut last = None;
     for plan in plans {
         if !plan.steps.is_empty() {
@@ -60,10 +61,14 @@ pub async fn run(
     Ok(0)
 }
 
-pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, Failure> {
+pub fn explain(
+    connection: &Connection,
+    url: &ConnectionUrl,
+    args: &[String],
+) -> Result<Vec<String>, Failure> {
     let args = arguments(args)?;
     let mut lines = Vec::new();
-    for plan in plans(connection, &args.eval)? {
+    for plan in plans(url, &args.eval)? {
         if let Shape::Switched(name, _) = &plan.shape {
             lines.push(format!("use {name}"));
         }
@@ -84,8 +89,8 @@ pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, 
     Ok(lines)
 }
 
-fn plans(connection: &Connection, evals: &[String]) -> Result<Vec<Plan>, Failure> {
-    let mut db = connection.url.database.clone();
+fn plans(url: &ConnectionUrl, evals: &[String]) -> Result<Vec<Plan>, Failure> {
+    let mut db = url.database.clone();
     let mut plans = Vec::new();
     for eval in evals {
         for statement in parse(eval)? {
@@ -95,15 +100,15 @@ fn plans(connection: &Connection, evals: &[String]) -> Result<Vec<Plan>, Failure
     Ok(plans)
 }
 
-async fn connect(connection: &Connection) -> Result<Client, Failure> {
-    let mut options = ClientOptions::parse(connection.url.to_string())
+async fn connect(connection: &Connection, url: &ConnectionUrl) -> Result<Client, Failure> {
+    let mut options = ClientOptions::parse(url.text.as_str())
         .await
         .map_err(|error| Problem::Driver(error).into_failure(connection))?;
     options.app_name = Some("dbcli".into());
     options.server_selection_timeout = Some(TIMEOUT);
     options.connect_timeout = Some(TIMEOUT);
     let mut credential = options.credential.take().unwrap_or_default();
-    credential.username = Some(connection.url.user.clone());
+    credential.username = Some(url.user.clone());
     credential.password = Some(connection.password.expose_secret().to_string());
     options.credential = Some(credential);
     Client::with_options(options).map_err(|error| Problem::Driver(error).into_failure(connection))

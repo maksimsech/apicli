@@ -1,4 +1,4 @@
-use apicli_policy::{ConnectionUrl, Vault};
+use apicli_policy::Vault;
 use apicli_vault::Store;
 use secrecy::SecretString;
 
@@ -24,7 +24,7 @@ async fn evaluate(expressions: &[&str], vault: &Vault, store: &Store) -> Run {
 #[tokio::test(flavor = "current_thread")]
 async fn javascript_and_refused_flags_never_connect() {
     let offline = Server {
-        url: ConnectionUrl::parse("mongodb://agent@127.0.0.1:1/shop").unwrap(),
+        url: "mongodb://agent@127.0.0.1:1/shop".into(),
         password: "never-sent-123".into(),
     };
     let writer = vault(
@@ -74,7 +74,7 @@ async fn reads_run_and_writes_need_a_matching_rule() {
     let Some(server) = mongo() else {
         return;
     };
-    let db = server.url.database.clone();
+    let db = server.database();
     let writer = vault(
         &server,
         allow(&[
@@ -148,7 +148,7 @@ async fn a_denied_expression_stops_every_expression() {
     let Some(server) = mongo() else {
         return;
     };
-    let db = server.url.database.clone();
+    let db = server.database();
     let writer = vault(
         &server,
         allow(&[
@@ -179,7 +179,7 @@ async fn password_is_masked_in_output_errors_and_log() {
     let Some(server) = mongo() else {
         return;
     };
-    let db = server.url.database.clone();
+    let db = server.database();
     let password = server.password.clone();
     let writer = vault(
         &server,
@@ -228,7 +228,7 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
     let Some(server) = mongo() else {
         return;
     };
-    let db = server.url.database.clone();
+    let db = server.database();
     let rules = [("insert", format!("{db}.dbcli_rate")), ("drop", "*".into())];
     let rules = rules
         .iter()

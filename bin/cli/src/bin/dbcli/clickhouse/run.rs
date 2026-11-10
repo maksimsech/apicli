@@ -7,7 +7,7 @@ use std::{
 };
 
 use apicli::Failure;
-use apicli_policy::{Connection, Tls};
+use apicli_policy::Connection;
 use bytes::Bytes;
 use reqwest::{Certificate, Client, Error, redirect::Policy};
 use secrecy::ExposeSecret;
@@ -15,7 +15,8 @@ use url::Url;
 
 use super::args::{ClientArgs, parse};
 use crate::shared::{
-    Context, Dialect, Statement, mode, read_only, rotate_hint, split, tokens, word, writes,
+    COMMITS, ConnectionUrl, Context, Dialect, Statement, Tls, flag, read_only, rotate_hint, split,
+    tokens, word, writes,
 };
 
 const READONLY: &str = "164";
@@ -24,19 +25,20 @@ const TIMEOUT: &str = "60";
 
 pub async fn run(
     connection: &Connection,
+    url: &ConnectionUrl,
     args: &[String],
     context: &mut Context<'_>,
 ) -> Result<u8, Failure> {
     let (args, params) = parse(args)?;
     context.statements(&args.query);
     let statements = statements(connection, &args)?;
-    context.entry.rule = Some(mode(connection).into());
-    let client = client(connection)?;
-    let [first, rest] = endpoints(connection, &format(&args, context.terminal), &params)?;
+    context.entry.rule = Some(flag(connection).into());
+    let client = client(url)?;
+    let [first, rest] = endpoints(connection, url, &format(&args, context.terminal), &params)?;
     for (index, statement) in statements.iter().enumerate() {
         context.take(connection, args.common.wait)?;
         let endpoint = if index == 0 { &first } else { &rest };
-        let body = send(&client, connection, endpoint, statement).await?;
+        let body = send(&client, connection, url, endpoint, statement).await?;
         context.print(&body)?;
     }
     Ok(0)
@@ -44,7 +46,19 @@ pub async fn run(
 
 pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, Failure> {
     let (args, _) = parse(args)?;
-    Ok(writes(connection, statements(connection, &args)?.len()))
+    Ok(writes(
+        connection,
+        statements(connection, &args)?.len(),
+        describe(connection),
+    ))
+}
+
+pub fn describe(connection: &Connection) -> &'static str {
+    if connection.write {
+        COMMITS
+    } else {
+        "read-only, the server runs each statement with readonly=1"
+    }
 }
 
 fn statements(connection: &Connection, args: &ClientArgs) -> Result<Vec<Statement>, Failure> {
@@ -69,13 +83,13 @@ fn statements(connection: &Connection, args: &ClientArgs) -> Result<Vec<Statemen
     Ok(statements)
 }
 
-fn client(connection: &Connection) -> Result<Client, Failure> {
+fn client(url: &ConnectionUrl) -> Result<Client, Failure> {
     let mut builder = Client::builder()
         .redirect(Policy::none())
         .no_proxy()
         .connect_timeout(Duration::from_secs(10))
         .user_agent("dbcli");
-    if let Some(path) = &connection.url.root_cert {
+    if let Some(path) = &url.root_cert {
         let unreadable =
             |error: &dyn Display| Failure::Read(format!("the CA file {path}: {error}"));
         let pem = fs::read(path).map_err(|error| unreadable(&error))?;
@@ -104,10 +118,10 @@ fn format(args: &ClientArgs, terminal: bool) -> String {
 
 fn endpoints(
     connection: &Connection,
+    url: &ConnectionUrl,
     format: &str,
     params: &[(String, String)],
 ) -> Result<[Url; 2], Failure> {
-    let url = &connection.url;
     let scheme = if url.tls == Tls::Require {
         "https"
     } else {
@@ -148,11 +162,11 @@ fn endpoints(
 async fn send(
     client: &Client,
     connection: &Connection,
+    url: &ConnectionUrl,
     endpoint: &Url,
     statement: &Statement,
 ) -> Result<Bytes, Failure> {
     let sql = statement.text.as_str();
-    let url = &connection.url;
     let response = client
         .post(endpoint.clone())
         .header("X-ClickHouse-User", &url.user)

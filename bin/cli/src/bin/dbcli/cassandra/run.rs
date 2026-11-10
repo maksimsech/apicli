@@ -10,7 +10,7 @@ use super::{
     cql::{Action, Local, Step, plan, protect},
     value::{format, text},
 };
-use crate::shared::{Context, summary};
+use crate::shared::{ConnectionUrl, Context, summary};
 
 const LEVELS: [(&str, u16); 11] = [
     ("ANY", 0x0000),
@@ -38,12 +38,13 @@ struct State {
 
 pub async fn run(
     connection: &Connection,
+    url: &ConnectionUrl,
     args: &[String],
     context: &mut Context<'_>,
 ) -> Result<u8, Failure> {
     let args = parse(args)?;
     context.statements(&args.execute);
-    let start = start(connection, &args);
+    let start = start(url, &args);
     let steps = plan(connection, &args.execute, start.clone())?;
     context.entry.rule = Some(summary(steps.iter().filter_map(
         |step| match &step.action {
@@ -54,6 +55,7 @@ pub async fn run(
     )));
     let mut session = Session::open(
         connection,
+        url,
         seconds(args.connect_timeout),
         seconds(args.request_timeout),
     )
@@ -85,9 +87,13 @@ pub async fn run(
     }
 }
 
-pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, Failure> {
+pub fn explain(
+    connection: &Connection,
+    url: &ConnectionUrl,
+    args: &[String],
+) -> Result<Vec<String>, Failure> {
     let args = parse(args)?;
-    let steps = plan(connection, &args.execute, start(connection, &args))?;
+    let steps = plan(connection, &args.execute, start(url, &args))?;
     Ok(steps
         .iter()
         .map(|step| match &step.action {
@@ -103,9 +109,9 @@ pub fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, 
         .collect())
 }
 
-fn start(connection: &Connection, args: &CqlshArgs) -> Option<String> {
+fn start(url: &ConnectionUrl, args: &CqlshArgs) -> Option<String> {
     args.keyspace.clone().or_else(|| {
-        let keyspace = &connection.url.database;
+        let keyspace = &url.database;
         (!keyspace.is_empty()).then(|| keyspace.clone())
     })
 }

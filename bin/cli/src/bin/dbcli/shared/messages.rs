@@ -1,5 +1,5 @@
 use apicli::Failure;
-use apicli_policy::{Connection, Engine};
+use apicli_policy::Connection;
 
 use super::text::quote;
 
@@ -17,29 +17,20 @@ pub fn write_hint(name: &str) -> String {
     format!("to allow writes, the user can run: dbcli allow add {name} write")
 }
 
-pub fn mode(connection: &Connection) -> &'static str {
-    match (connection.url.engine.write_flag(), connection.write) {
-        (true, true) => "read-write",
-        (true, false) => "read-only",
-        _ if connection.allow.is_empty() => "read-only",
-        _ => "rules",
+pub const COMMITS: &str = "read-write, each statement commits";
+
+pub fn flag(connection: &Connection) -> &'static str {
+    if connection.write {
+        "read-write"
+    } else {
+        "read-only"
     }
 }
 
-pub fn describe(connection: &Connection) -> &'static str {
-    match connection.url.engine {
-        engine if engine.write_flag() && connection.write => "read-write, each statement commits",
-        Engine::Postgres => "read-only, each statement runs in a read-only transaction",
-        Engine::ClickHouse => "read-only, the server runs each statement with readonly=1",
-        _ if connection.allow.is_empty() => "read-only, other commands need an allow rule",
-        _ => "reads, plus what the allow rules below match",
-    }
-}
-
-pub fn writes(connection: &Connection, statements: usize) -> Vec<String> {
+pub fn writes(connection: &Connection, statements: usize, describe: &str) -> Vec<String> {
     let mut lines = vec![
         format!("statements: {statements}"),
-        format!("mode: {}", describe(connection)),
+        format!("mode: {describe}"),
     ];
     if !connection.write {
         lines.push(write_hint(&connection.name));

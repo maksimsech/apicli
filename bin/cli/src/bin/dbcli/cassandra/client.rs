@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use apicli::Failure;
-use apicli_policy::{Connection, Tls};
+use apicli_policy::Connection;
 use bytes::{Buf, Bytes, BytesMut};
 use secrecy::ExposeSecret;
 use tokio::{
@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use super::value::{Kind, Reader};
-use crate::shared::{Io, dial, lost, rotate_hint, secure};
+use crate::shared::{ConnectionUrl, Io, Tls, dial, lost, rotate_hint, secure};
 
 const VERSION: u8 = 0x04;
 const PAGE: i32 = 5000;
@@ -54,19 +54,20 @@ struct Frame {
 impl Session {
     pub async fn open(
         connection: &Connection,
+        url: &ConnectionUrl,
         connect: Duration,
         limit: Duration,
     ) -> Result<Session, Failure> {
         let mut last = None;
-        for (host, port) in &connection.url.hosts {
-            match timeout(connect, reach(connection, host, *port)).await {
+        for (host, port) in &url.hosts {
+            match timeout(connect, reach(url, host, *port)).await {
                 Ok(Ok(io)) => {
                     let mut session = Session {
                         io,
                         buf: BytesMut::with_capacity(8192),
                         limit,
                     };
-                    timeout(connect, session.start(connection, host, *port))
+                    timeout(connect, session.start(connection, url, host, *port))
                         .await
                         .map_err(|_| Failure::Timeout)??;
                     return Ok(session);
@@ -81,10 +82,10 @@ impl Session {
     async fn start(
         &mut self,
         connection: &Connection,
+        url: &ConnectionUrl,
         host: &str,
         port: u16,
     ) -> Result<(), Failure> {
-        let url = &connection.url;
         let mut body = Vec::new();
         body.extend_from_slice(&1u16.to_be_bytes());
         string(&mut body, "CQL_VERSION");
@@ -247,8 +248,7 @@ impl Session {
     }
 }
 
-async fn reach(connection: &Connection, host: &str, port: u16) -> Result<Box<dyn Io>, Failure> {
-    let url = &connection.url;
+async fn reach(url: &ConnectionUrl, host: &str, port: u16) -> Result<Box<dyn Io>, Failure> {
     let stream = dial(host, port).await?;
     Ok(if url.tls == Tls::Require {
         Box::new(secure(host, url.root_cert.as_deref(), None, "cacert", stream).await?)

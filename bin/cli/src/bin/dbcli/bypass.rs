@@ -7,17 +7,26 @@ mod redis;
 use std::{env, fs, process};
 
 use apicli::Entry;
-use apicli_policy::{Allow, Connection, ConnectionUrl, Rate, Vault};
+use apicli_policy::{Allow, Connection, Rate, Vault};
 use apicli_vault::Store;
 use percent_encoding::percent_decode_str;
 use secrecy::SecretString;
 use url::Url;
 
-use crate::{call::perform, shared::Context};
+use crate::{
+    call::{parse, perform},
+    shared::Context,
+};
 
 struct Server {
-    url: ConnectionUrl,
+    url: String,
     password: String,
+}
+
+impl Server {
+    fn database(&self) -> String {
+        parse(&self.url).unwrap().database
+    }
 }
 
 struct Run {
@@ -34,7 +43,7 @@ fn server(variable: &str) -> Option<Server> {
         .into_owned();
     url.set_password(None).unwrap();
     Some(Server {
-        url: ConnectionUrl::parse(url.as_str()).unwrap(),
+        url: url.to_string(),
         password,
     })
 }

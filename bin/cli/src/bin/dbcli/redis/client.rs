@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use apicli::Failure;
-use apicli_policy::{Connection, Tls};
+use apicli_policy::Connection;
 use bytes::{Buf, BytesMut};
 use secrecy::ExposeSecret;
 use tokio::{
@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use super::reply::{Parser, Reply, lossy};
-use crate::shared::{Io, dial, lost, rotate_hint, secure};
+use crate::shared::{ConnectionUrl, Io, Tls, dial, lost, rotate_hint, secure};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -20,14 +20,21 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn open(connection: &Connection, db: u32) -> Result<Client, Failure> {
-        timeout(CONNECT_TIMEOUT, Client::start(connection, db))
+    pub async fn open(
+        connection: &Connection,
+        url: &ConnectionUrl,
+        db: u32,
+    ) -> Result<Client, Failure> {
+        timeout(CONNECT_TIMEOUT, Client::start(connection, url, db))
             .await
             .map_err(|_| Failure::Timeout)?
     }
 
-    async fn start(connection: &Connection, db: u32) -> Result<Client, Failure> {
-        let url = &connection.url;
+    async fn start(
+        connection: &Connection,
+        url: &ConnectionUrl,
+        db: u32,
+    ) -> Result<Client, Failure> {
         let stream = dial(&url.host, url.port).await?;
         let io: Box<dyn Io> = if url.tls == Tls::Require {
             Box::new(secure(&url.host, url.root_cert.as_deref(), None, "cacert", stream).await?)

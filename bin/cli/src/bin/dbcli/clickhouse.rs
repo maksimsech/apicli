@@ -1,4 +1,6 @@
 mod args;
 mod run;
+mod url;
 
-pub use run::{explain, run};
+pub use run::{describe, explain, run};
+pub use url::parse;

@@ -4,8 +4,8 @@ use apicli_vault::Store;
 use serde::Serialize;
 
 use crate::{
-    call::{self, find, scrub},
-    shared::{add_hint, describe, key, mode, redactor},
+    call::{self, Engine, find, scrub},
+    shared::{add_hint, key, redactor},
 };
 
 #[derive(Serialize)]
@@ -46,16 +46,19 @@ pub fn connections(json: bool) -> Result<u8, Failure> {
         let listed = vault
             .connections
             .iter()
-            .map(|connection| Listed {
-                name: connection.name.clone(),
-                url: connection.url.to_string(),
-                engine: connection.url.engine.name(),
-                mode: mode(connection),
-                allow: connection.allow.iter().map(ToString::to_string).collect(),
-                limit: connection.limits().to_string(),
-                remaining: remaining(&store, connection),
+            .map(|connection| {
+                let engine = engine(connection)?;
+                Ok(Listed {
+                    name: connection.name.clone(),
+                    url: connection.url.clone(),
+                    engine: engine.name(),
+                    mode: engine.mode(connection),
+                    allow: connection.allow.iter().map(ToString::to_string).collect(),
+                    limit: connection.limits().to_string(),
+                    remaining: remaining(&store, connection),
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, Failure>>()?;
         print_json(&listed)?;
     } else if vault.connections.is_empty() {
         println!(
@@ -66,8 +69,9 @@ pub fn connections(json: bool) -> Result<u8, Failure> {
         for connection in &vault.connections {
             println!("{}", connection.name);
             println!("  url: {}", connection.url);
-            println!("  engine: {}", connection.url.engine.name());
-            println!("  mode: {}", describe(connection));
+            let engine = engine(connection)?;
+            println!("  engine: {}", engine.name());
+            println!("  mode: {}", engine.describe(connection));
             for rule in &connection.allow {
                 println!("  allow: {rule}");
             }
@@ -98,8 +102,8 @@ pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Fail
     };
     let code = match find(&vault, name) {
         Ok(connection) => {
-            explanation.url = Some(connection.url.to_string());
-            explanation.engine = Some(connection.url.engine.name());
+            explanation.url = Some(connection.url.clone());
+            explanation.engine = Engine::of(&connection.url).ok().map(Engine::name);
             match call::explain(connection, args).await {
                 Ok(checks) => {
                     explanation.allowed = true;
@@ -135,6 +139,10 @@ pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Fail
         );
     }
     Ok(code)
+}
+
+fn engine(connection: &Connection) -> Result<Engine, Failure> {
+    Engine::of(&connection.url).map_err(Failure::Integrity)
 }
 
 fn remaining(store: &Store, connection: &Connection) -> Option<u32> {
