@@ -4,6 +4,7 @@ mod call;
 mod cli;
 mod info;
 mod postgres;
+mod redis;
 mod rules;
 mod secret;
 mod tls;

@@ -1,4 +1,5 @@
 mod postgres;
+mod redis;
 
 use std::{env, fs, process};
 

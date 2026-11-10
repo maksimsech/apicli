@@ -9,7 +9,7 @@ use apicli_policy::{Connection, Engine, Redactor, Vault};
 use apicli_vault::Store;
 use clap::{Parser, parser::ValueSource};
 
-use crate::{postgres, secret::add_hint};
+use crate::{postgres, redis, secret::add_hint};
 
 const MASK: &str = "[dbcli:redacted]";
 
@@ -109,7 +109,8 @@ pub async fn perform(
     let connection = find(vault, name)?;
     let result = match connection.url.engine {
         Engine::Postgres => postgres::run(connection, args, context).await,
-        Engine::Redis | Engine::Mongo => Err(unfinished(connection)),
+        Engine::Redis => redis::run(connection, args, context).await,
+        Engine::Mongo => Err(unfinished(connection)),
     };
     result.map_err(|failure| scrub(failure, &context.redactor))
 }
@@ -117,7 +118,8 @@ pub async fn perform(
 pub async fn explain(connection: &Connection, args: &[String]) -> Result<Vec<String>, Failure> {
     match connection.url.engine {
         Engine::Postgres => postgres::explain(connection, args),
-        Engine::Redis | Engine::Mongo => Err(unfinished(connection)),
+        Engine::Redis => redis::explain(connection, args).await,
+        Engine::Mongo => Err(unfinished(connection)),
     }
 }
 
@@ -165,6 +167,10 @@ pub fn find<'a>(vault: &'a Vault, name: &str) -> Result<&'a Connection, Failure>
 
 pub fn key(name: &str) -> String {
     format!("db:{name}")
+}
+
+pub fn quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 pub fn redactor(vault: &Vault) -> Redactor {
