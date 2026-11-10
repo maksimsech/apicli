@@ -137,7 +137,7 @@ pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Fail
 
 fn mode(connection: &Connection) -> &'static str {
     match connection.url.engine {
-        Engine::Postgres => postgres::mode(connection),
+        Engine::Postgres | Engine::ClickHouse => postgres::mode(connection),
         _ if connection.allow.is_empty() => "read-only",
         _ => "rules",
     }
@@ -146,6 +146,8 @@ fn mode(connection: &Connection) -> &'static str {
 fn describe(connection: &Connection) -> &'static str {
     match connection.url.engine {
         Engine::Postgres => postgres::describe(connection),
+        Engine::ClickHouse if connection.write => "read-write, each statement commits",
+        Engine::ClickHouse => "read-only, the server runs each statement with readonly=1",
         _ if connection.allow.is_empty() => "read-only, other commands need an allow rule",
         _ => "reads, plus what the allow rules below match",
     }

@@ -6,7 +6,7 @@ use crate::cli::{SecretCommand, reserved};
 
 pub fn add_hint(name: &str) -> String {
     format!(
-        "dbcli secret add {name} --url 'postgres://USER@HOST:5432/DATABASE' (or a redis://USER@HOST:6379/0 or mongodb://USER@HOST:27017/DATABASE URL)"
+        "dbcli secret add {name} --url 'postgres://USER@HOST:5432/DATABASE' (or a redis://, mongodb://, cassandra:// or clickhouse:// URL)"
     )
 }
 

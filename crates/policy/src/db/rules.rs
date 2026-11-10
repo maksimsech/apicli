@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{Connection, Engine};
 
+const TABLE_WRITES: [&str; 4] = ["INSERT", "UPDATE", "DELETE", "TRUNCATE"];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Allow {
     pub action: String,
@@ -24,10 +26,25 @@ impl Connection {
     pub fn check_rule(&self, action: &str, target: Option<&str>) -> Result<Allow, String> {
         let target = target.map(String::from);
         match self.url.engine {
-            Engine::Postgres => Err(format!(
-                "Postgres connections take only `dbcli allow add {} write`, limits on tables belong in Postgres GRANTs",
+            Engine::Postgres | Engine::ClickHouse => Err(format!(
+                "{} connections take only `dbcli allow add {} write`, limits on tables belong in GRANTs",
+                self.url.engine.name(),
                 self.name
             )),
+            Engine::Cassandra => {
+                let action = action.to_ascii_uppercase();
+                if action.is_empty() || !action.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+                    return Err(format!(
+                        "{action} is not a CQL statement keyword, use one like INSERT, UPDATE or CREATE"
+                    ));
+                }
+                if target.is_none() && TABLE_WRITES.contains(&action.as_str()) {
+                    return Err(format!(
+                        "{action} rules need a table, like 'shop.orders', 'shop.*' or '*'"
+                    ));
+                }
+                Ok(Allow { action, target })
+            }
             Engine::Redis => {
                 let valid = action.split('|').count() <= 2
                     && action.split('|').all(|part| {
@@ -68,7 +85,14 @@ impl Connection {
 
     pub fn rule(&self, action: &str, targets: &[&[u8]]) -> Option<&Allow> {
         self.allow.iter().find(|rule| match self.url.engine {
-            Engine::Postgres => false,
+            Engine::Postgres | Engine::ClickHouse => false,
+            Engine::Cassandra => {
+                rule.action.eq_ignore_ascii_case(action)
+                    && match &rule.target {
+                        None => targets.is_empty(),
+                        Some(pattern) => targets.len() == 1 && glob(pattern.as_bytes(), targets[0]),
+                    }
+            }
             Engine::Redis => {
                 let named = rule.action.eq_ignore_ascii_case(action)
                     || action
@@ -238,6 +262,21 @@ mod tests {
     }
 
     #[test]
+    fn cassandra_rules_match_keyword_and_table() {
+        let connection = with_rules(
+            "cassandra://agent@10.0.0.1/shop",
+            &[("INSERT", Some("shop.*")), ("GRANT", None)],
+        );
+
+        assert!(connection.rule("insert", &[b"shop.orders"]).is_some());
+        assert!(connection.rule("INSERT", &[b"other.orders"]).is_none());
+        assert!(connection.rule("UPDATE", &[b"shop.orders"]).is_none());
+        assert!(connection.rule("GRANT", &[]).is_some());
+        assert!(connection.rule("GRANT", &[b"shop.orders"]).is_none());
+        assert!(connection.rule("INSERT", &[]).is_none());
+    }
+
+    #[test]
     fn rules_are_checked_per_engine() {
         let postgres = with_rules("postgres://agent@db.example.com/app", &[]);
         let redis = with_rules("redis://cache.example.com", &[]);
@@ -252,5 +291,19 @@ mod tests {
         assert!(mongo.check_rule("update", None).is_err());
         assert!(mongo.check_rule("update", Some("shop.orders")).is_ok());
         assert!(mongo.check_rule("$where", Some("*")).is_err());
+
+        let cassandra = with_rules("cassandra://agent@10.0.0.1/shop", &[]);
+        let clickhouse = with_rules("clickhouse://agent@db.example.com/default", &[]);
+
+        assert!(cassandra.check_rule("INSERT", None).is_err());
+        assert!(cassandra.check_rule("DROP; GRANT", None).is_err());
+        assert_eq!(
+            cassandra
+                .check_rule("create", Some("shop.*"))
+                .unwrap()
+                .action,
+            "CREATE"
+        );
+        assert!(clickhouse.check_rule("INSERT", Some("default.t")).is_err());
     }
 }

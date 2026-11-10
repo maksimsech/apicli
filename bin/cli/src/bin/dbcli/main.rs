@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod bypass;
 mod call;
+mod cassandra;
 mod cli;
 mod info;
 mod mongo;
@@ -8,6 +9,7 @@ mod postgres;
 mod redis;
 mod rules;
 mod secret;
+mod split;
 mod tls;
 
 use std::{env, process::ExitCode};

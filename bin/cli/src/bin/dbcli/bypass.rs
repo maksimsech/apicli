@@ -1,3 +1,4 @@
+mod cassandra;
 mod mongo;
 mod postgres;
 mod redis;
