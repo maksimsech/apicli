@@ -1,6 +1,8 @@
 use std::{
     fs,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    hash::{BuildHasher, RandomState},
+    process,
+    time::{Duration, SystemTime},
 };
 
 use apicli::Failure;
@@ -115,11 +117,8 @@ fn client(connection: &Connection) -> Result<Client, Failure> {
 }
 
 fn session() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos())
-        .unwrap_or_default();
-    format!("dbcli-{}-{nanos:x}", std::process::id())
+    let random = RandomState::new().hash_one((process::id(), SystemTime::now()));
+    format!("dbcli-{random:016x}")
 }
 
 fn format(args: &ClientArgs, terminal: bool) -> String {
