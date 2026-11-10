@@ -5,7 +5,7 @@ use clap::{ArgAction, ColorChoice, CommandFactory, Parser, Subcommand};
 #[command(
     name = "dbcli",
     version,
-    about = "psql, redis-cli and mongosh for databases that need credentials",
+    about = "psql, redis-cli, mongosh, cqlsh and clickhouse-client for databases that need credentials",
     color = ColorChoice::Never,
     args_override_self = true,
     args_conflicts_with_subcommands = true,
@@ -26,7 +26,7 @@ pub struct Cli {
         value_name = "ARGS",
         trailing_var_arg = true,
         allow_hyphen_values = true,
-        help = "Flags as for the engine's own CLI: psql -c SQL, redis-cli COMMAND, mongosh --eval EXPR. See dbcli NAME --help"
+        help = "Flags as for the engine's own CLI: psql -c SQL, redis-cli COMMAND, mongosh --eval EXPR, cqlsh -e CQL, clickhouse-client -q SQL. See dbcli NAME --help"
     )]
     pub args: Vec<String>,
     #[arg(long, action = ArgAction::Help, global = true, help = "Print help")]
@@ -102,7 +102,7 @@ pub enum SecretCommand {
         name: String,
         #[arg(
             long,
-            help = "Connection URL without the password, like postgres://agent@db.example.com:5432/app?sslmode=require, redis://agent@cache.example.com:6379/0 or mongodb://agent@db.example.com:27017/shop"
+            help = "Connection URL without the password, like postgres://agent@db.example.com:5432/app?sslmode=require, redis://agent@cache.example.com:6379/0, mongodb://agent@db.example.com:27017/shop, cassandra://agent@10.0.0.1,10.0.0.2:9042/shop or clickhouse://agent@ch.example.com:8123/default"
         )]
         url: String,
     },
@@ -115,7 +115,7 @@ pub enum SecretCommand {
 #[derive(Debug, Subcommand)]
 pub enum AllowCommand {
     #[command(
-        about = "Allow ACTION on NAME: `write` on Postgres, a command and key glob on Redis (SET 'cache:*'), a command and namespace on MongoDB (insert 'shop.*')"
+        about = "Allow ACTION on NAME: `write` on Postgres and ClickHouse, a command and key glob on Redis (SET 'cache:*'), a command and namespace on MongoDB (insert 'shop.*'), a keyword and table on Cassandra (INSERT 'shop.*')"
     )]
     Add {
         name: String,

@@ -1,11 +1,11 @@
 ---
 name: dbcli
-description: Use dbcli instead of psql, redis-cli or mongosh to query PostgreSQL, Redis or MongoDB databases that need credentials, such as production databases while debugging. dbcli sends the password itself, so never ask the user for it. Use it when you need data from a configured database, or when psql, redis-cli or mongosh asks for a password or fails to authenticate.
+description: Use dbcli instead of psql, redis-cli, mongosh, cqlsh or clickhouse-client to query PostgreSQL, Redis, MongoDB, Cassandra or ClickHouse databases that need credentials, such as production databases while debugging. dbcli sends the password itself, so never ask the user for it. Use it when you need data from a configured database, or when one of those clients asks for a password or fails to authenticate.
 ---
 
 # dbcli
 
-dbcli is psql, redis-cli and mongosh for databases that need credentials. You pick a connection by name, and dbcli connects with the stored host, user and password, so you never see or handle them.
+dbcli is psql, redis-cli, mongosh, cqlsh and clickhouse-client for databases that need credentials. You pick a connection by name, and dbcli connects with the stored host, user and password, so you never see or handle them.
 
 ## First
 
@@ -55,13 +55,38 @@ Use it like `mongosh --eval`:
 - find prints the first 20 documents, then `Type "it" for more`. Narrow the query, or add `.toArray()` for all of them.
 - find, aggregate without `$out` or `$merge`, counts, distinct and listings run. Every other command needs an allow rule. dbcli checks every expression before running any, so one denied expression stops them all.
 
+## Cassandra
+
+Use it like `cqlsh -e`:
+
+    dbcli events -e 'SELECT * FROM shop.orders WHERE id = 42'
+    dbcli events -k shop -e 'DESCRIBE TABLES'
+    dbcli events -e 'EXPAND ON; SELECT * FROM shop.orders WHERE id = 42'
+
+- Separate statements with `;`. Output matches cqlsh. SELECT, LIST, DESCRIBE and USE run, and so do the cqlsh commands EXPAND, CONSISTENCY and SERIAL CONSISTENCY. COPY, SOURCE, CAPTURE, TRACING and the other cqlsh commands are refused.
+- Every other statement needs an allow rule for its keyword and table, like `INSERT 'shop.*'`. Every statement in a BATCH must be allowed. dbcli checks every statement before running any, so one denied statement stops them all. After a server error the next statements still run, as in cqlsh, and dbcli exits 1 at the end.
+- Flags: -e, -k, --request-timeout. Refused: -u, -p, --ssl, -f, and a host or port.
+
+## ClickHouse
+
+Use it like `clickhouse-client -q`:
+
+    dbcli metrics -q 'SELECT count() FROM events'
+    dbcli metrics -f PrettyCompact -q 'SELECT * FROM events LIMIT 5'
+    dbcli metrics --param_id=42 -q 'SELECT * FROM events WHERE id = {id:UInt64}'
+
+- Separate statements with `;` or repeat `-q`. Output is TabSeparated, as clickhouse-client prints it when stdout isn't a terminal. Pick another format with `-f` or a FORMAT clause, or `-E` for vertical output.
+- Connections are read-only unless the user allowed writes. There, ClickHouse runs each statement with readonly=1, so writes, SET, settings in queries and table functions like url() and file() fail, and dbcli refuses KILL. Read-only statements time out after 60 seconds.
+- On a connection with writes allowed, each statement commits right away.
+- Flags: -q, -f, -E, -m, -n, --param_NAME=VALUE. Refused: -h, --port, -u, --password, --secure, -d, --queries-file.
+
 ## When a call fails
 
 - 110, denied: the call writes, or runs a command no allow rule covers. stderr has a `dbcli allow add ...` line. Show it to the user and wait. Don't retry another way.
 - 111, rate limited: stderr says how long to wait. Wait, or rerun with `--wait` (up to 30s) or `--wait=SECONDS`. Don't loop on retries.
 - 112, connection not configured: show the user the `dbcli secret add ...` line from stderr and wait.
 - 113 or 114: dbcli's setup is broken. Tell the user. Don't touch its files.
-- 1: the database returned an error, printed as psql or mongosh print it. Fix the statement.
+- 1: the database returned an error, printed as its own client prints it. Fix the statement.
 - 2: unsupported flag, command or expression, or bad arguments. stderr names the problem.
 - 7: could not connect. If stderr says the password failed, show the user its `dbcli secret rotate NAME` line and wait.
 - 6, 28, 35, 56: DNS failure, timeout, TLS error, connection dropped.
@@ -69,6 +94,6 @@ Use it like `mongosh --eval`:
 
 ## Never
 
-- Ask for database passwords or connection strings, or look for them in files, ~/.pgpass, the keychain or the environment.
+- Ask for database passwords or connection strings, or look for them in files, ~/.pgpass, ~/.cassandra, ~/.clickhouse-client, the keychain or the environment.
 - Edit dbcli's files, or run `dbcli secret`, `allow`, `limit`, `log limit` or `password`. Those need the user at a terminal.
-- Work around a refusal with psql, redis-cli, mongosh, another tool or another connection.
+- Work around a refusal with psql, redis-cli, mongosh, cqlsh, clickhouse-client, another tool or another connection.

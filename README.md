@@ -4,7 +4,7 @@ curl for APIs that need credentials, built for coding agents.
 
 apicli adds the API key for each host itself, so your agent can call real APIs without ever seeing the key. Requests are read-only by default, writes are allowed per path, and each host can have a rate limit.
 
-The same install gives you [dbcli](#dbcli), which does the same for PostgreSQL, Redis and MongoDB.
+The same install gives you [dbcli](#dbcli), which does the same for PostgreSQL, Redis, MongoDB, Cassandra and ClickHouse.
 
 ## Install
 
@@ -52,17 +52,19 @@ apicli log
 
 ## dbcli
 
-psql, redis-cli and mongosh for databases that need credentials. It shares apicli's vault, admin password and log.
+psql, redis-cli, mongosh, cqlsh and clickhouse-client for databases that need credentials. It shares apicli's vault, admin password and log.
 
 ```sh
 dbcli secret add prod-pg --url 'postgres://agent@db.example.com:5432/app?sslmode=require'
 dbcli secret add cache --url 'rediss://agent@cache.example.com:6380/0'
 dbcli secret add shop --url 'mongodb://agent@db.example.com:27017/shop?authSource=admin'
+dbcli secret add events --url 'cassandra://agent@10.0.0.1,10.0.0.2:9042/shop?tls=true'
+dbcli secret add metrics --url 'clickhouse://agent@ch.example.com:8443/default?secure=true'
 dbcli skill install --agent claude
 dbcli connections
 ```
 
-You type the password at a prompt. TLS certificates are always verified. For a private CA, add `sslrootcert=PATH`, `cacert=PATH` or `tlsCAFile=PATH` to the URL.
+You type the password at a prompt. ClickHouse URLs take the HTTP port. TLS certificates are always verified. For a private CA, add `sslrootcert=PATH`, `tlsCAFile=PATH` or `cacert=PATH` to the URL.
 
 After the connection name come the engine's own flags. `dbcli NAME --help` lists them.
 
@@ -70,6 +72,8 @@ After the connection name come the engine's own flags. `dbcli NAME --help` lists
 dbcli prod-pg -c 'select id, email from users limit 5' -c '\d users'
 dbcli cache GET session:42
 dbcli shop --eval 'db.orders.find({status: "paid"}).limit(5)'
+dbcli events -e 'SELECT * FROM shop.orders WHERE id = 42'
+dbcli metrics -q 'SELECT count() FROM events'
 ```
 
 Connections are read-only by default:
@@ -77,6 +81,8 @@ Connections are read-only by default:
 - Postgres runs each statement in its own read-only transaction, so Postgres itself rejects writes.
 - Redis runs the commands the server marks read-only, except dangerous and scripting ones like KEYS and EVAL_RO.
 - MongoDB runs finds, counts, listings and aggregations without `$out` or `$merge`. dbcli parses mongosh expressions itself and never runs JavaScript.
+- Cassandra runs SELECT, LIST, DESCRIBE and USE.
+- ClickHouse runs each statement with `readonly=1`, so the server rejects writes.
 
 Writes and limits are opt-in:
 
@@ -85,10 +91,12 @@ dbcli allow add prod-pg write
 dbcli allow add cache SET 'cache:*'     # every key the command touches must match
 dbcli allow add cache 'CONFIG|GET'      # a command without keys takes no glob
 dbcli allow add shop insert 'shop.*'    # a command and a namespace glob
+dbcli allow add events INSERT 'shop.*'  # a statement keyword and a table glob
+dbcli allow add metrics write
 dbcli limit set prod-pg 30/min
 ```
 
-For limits on Postgres tables, give the connection a database user with only the grants it needs. `dbcli --help` lists every command.
+For limits on Postgres and ClickHouse tables, give the connection a database user with only the grants it needs. `dbcli --help` lists every command.
 
 ## What it protects
 
