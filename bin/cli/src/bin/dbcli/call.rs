@@ -9,7 +9,7 @@ use apicli_policy::{Connection, Engine, Redactor, Vault};
 use apicli_vault::Store;
 use clap::{Parser, parser::ValueSource};
 
-use crate::{postgres, redis, secret::add_hint};
+use crate::{mongo, postgres, redis, secret::add_hint};
 
 const MASK: &str = "[dbcli:redacted]";
 
@@ -110,7 +110,7 @@ pub async fn perform(
     let result = match connection.url.engine {
         Engine::Postgres => postgres::run(connection, args, context).await,
         Engine::Redis => redis::run(connection, args, context).await,
-        Engine::Mongo => Err(unfinished(connection)),
+        Engine::Mongo => mongo::run(connection, args, context).await,
     };
     result.map_err(|failure| scrub(failure, &context.redactor))
 }
@@ -119,7 +119,7 @@ pub async fn explain(connection: &Connection, args: &[String]) -> Result<Vec<Str
     match connection.url.engine {
         Engine::Postgres => postgres::explain(connection, args),
         Engine::Redis => redis::explain(connection, args).await,
-        Engine::Mongo => Err(unfinished(connection)),
+        Engine::Mongo => mongo::explain(connection, args),
     }
 }
 
@@ -137,13 +137,6 @@ pub fn engine_args<T: Parser>(args: &[String], refused: &[Refused]) -> Result<T,
         return Err(refused.failure());
     }
     T::from_arg_matches(&matches).map_err(|error| usage("dbcli NAME", error))
-}
-
-fn unfinished(connection: &Connection) -> Failure {
-    Failure::Usage(format!(
-        "{} connections are not supported yet",
-        connection.url.engine.name()
-    ))
 }
 
 pub fn find<'a>(vault: &'a Vault, name: &str) -> Result<&'a Connection, Failure> {

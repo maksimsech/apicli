@@ -3,6 +3,7 @@ mod bypass;
 mod call;
 mod cli;
 mod info;
+mod mongo;
 mod postgres;
 mod redis;
 mod rules;
