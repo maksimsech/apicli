@@ -2,7 +2,7 @@
 
 apicli is a curl-compatible Rust CLI for coding agents. It adds per-host API credentials the agent never sees, enforces method and path rules, and rate limits per host. dbcli is its sibling for databases, compatible with psql, redis-cli, mongosh, cqlsh and clickhouse-client: named connections with stored passwords, read-only by default with per-command allow rules for Redis, MongoDB and Cassandra, and per-connection rate limits. dbcli is layered, and imports only point down: `shared` (context, messages, statement splitting, TLS) has no dbcli imports, each engine module (`postgres`, `redis`, `mongo`, `cassandra`, `clickhouse`) imports only `shared`, `call` dispatches to the engines, `commands` holds the subcommands, and `main` sits on top. Engines never import each other.
 
-Both binaries come from the package in `bin/cli`: `src/bin/apicli`, `src/bin/dbcli`, and shared code in `src/lib.rs`. Rules, connections and redaction live in `crates/policy`, storage in `crates/vault`. `bin/cli/skill/apicli/SKILL.md` and `bin/cli/skill/dbcli/SKILL.md` are compiled into the binaries and must match their behavior.
+Both binaries come from the package in `bin/cli`: `src/bin/apicli`, `src/bin/dbcli`, and shared code in `src/lib.rs`. Rules, connections and redaction live in `crates/policy`, storage in `crates/vault`, which depends on policy. Inside policy, `api` and `db` hold the per-kind types and rules, `vault` (the stored model and its lookups) sits above them, and `access` (authorize) sits on top. `bin/cli/skill/apicli/SKILL.md` and `bin/cli/skill/dbcli/SKILL.md` are compiled into the binaries and must match their behavior.
 
 ## Code
 

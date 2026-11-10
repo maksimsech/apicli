@@ -1,12 +1,15 @@
+mod access;
 mod api;
 mod db;
 mod limit;
 mod redact;
+mod secret;
 mod vault;
 
+pub use access::authorize;
 pub use api::{
     Body, Credential, Denial, Grant, HostPolicy, METHOD_OVERRIDES, Origin, Policy, READ_METHODS,
-    Rule, authorize, validate_path,
+    Rule, validate_path,
 };
 pub use db::{Allow, Connection, ConnectionUrl, Engine, Tls, glob};
 pub use limit::{Bucket, Limits, Rate, Wait};

@@ -1,21 +1,9 @@
 use url::Url;
 
-use super::{Body, Credential, Grant, Origin, Rule};
-use crate::Vault;
-
-pub const READ_METHODS: [&str; 3] = ["GET", "HEAD", "OPTIONS"];
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Denial {
-    Userinfo,
-    EncodedSeparator,
-    MethodOverride(String),
-    Unconfigured(String),
-    Uncovered,
-    Rule(Rule),
-    NotAllowed,
-    Body(String),
-}
+use crate::{
+    Vault,
+    api::{Body, Credential, Denial, Grant, Origin},
+};
 
 pub fn authorize<'a>(
     url: &Url,

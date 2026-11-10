@@ -1,7 +1,10 @@
-use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize, Serializer};
+use secrecy::ExposeSecret;
+use serde::{Deserialize, Serialize};
 
-use crate::{Connection, Credential, Policy};
+use crate::{
+    api::{Credential, Origin, Policy, matches},
+    db::Connection,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Admin {
@@ -31,8 +34,44 @@ impl Vault {
                     .map(|connection| connection.password.expose_secret()),
             )
     }
-}
 
-pub fn expose<S: Serializer>(secret: &SecretString, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(secret.expose_secret())
+    pub fn find(&self, name: &str) -> Option<&Credential> {
+        self.credentials
+            .iter()
+            .find(|credential| credential.name == name)
+    }
+
+    pub fn credential(&self, origin: &Origin, path: &str) -> Option<&Credential> {
+        let mut hosted = self
+            .credentials
+            .iter()
+            .filter(|credential| &credential.origin == origin);
+        hosted
+            .clone()
+            .find(|credential| {
+                credential
+                    .paths
+                    .iter()
+                    .any(|pattern| matches(pattern, path, false))
+            })
+            .or_else(|| hosted.find(|credential| credential.paths.is_empty()))
+    }
+
+    pub fn find_mut(&mut self, name: &str) -> Option<&mut Credential> {
+        self.credentials
+            .iter_mut()
+            .find(|credential| credential.name == name)
+    }
+
+    pub fn connection(&self, name: &str) -> Option<&Connection> {
+        self.connections
+            .iter()
+            .find(|connection| connection.name == name)
+    }
+
+    pub fn connection_mut(&mut self, name: &str) -> Option<&mut Connection> {
+        self.connections
+            .iter_mut()
+            .find(|connection| connection.name == name)
+    }
 }

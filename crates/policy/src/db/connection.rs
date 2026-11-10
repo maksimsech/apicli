@@ -2,7 +2,7 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use super::{Allow, ConnectionUrl};
-use crate::{Limits, Rate, Vault, vault::expose};
+use crate::{Limits, Rate, secret::expose};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Connection {
@@ -46,19 +46,5 @@ impl Connection {
             burst: self.burst,
             daily: self.daily,
         }
-    }
-}
-
-impl Vault {
-    pub fn connection(&self, name: &str) -> Option<&Connection> {
-        self.connections
-            .iter()
-            .find(|connection| connection.name == name)
-    }
-
-    pub fn connection_mut(&mut self, name: &str) -> Option<&mut Connection> {
-        self.connections
-            .iter_mut()
-            .find(|connection| connection.name == name)
     }
 }

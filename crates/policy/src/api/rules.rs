@@ -3,8 +3,22 @@ use std::{collections::BTreeMap, fmt};
 use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 
-use super::{Denial, Origin, READ_METHODS};
+use super::Origin;
 use crate::{Limits, Rate};
+
+pub const READ_METHODS: [&str; 3] = ["GET", "HEAD", "OPTIONS"];
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Denial {
+    Userinfo,
+    EncodedSeparator,
+    MethodOverride(String),
+    Unconfigured(String),
+    Uncovered,
+    Rule(Rule),
+    NotAllowed,
+    Body(String),
+}
 
 pub const METHOD_OVERRIDES: [&str; 3] = [
     "x-http-method-override",

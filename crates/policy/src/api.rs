@@ -1,9 +1,10 @@
-mod access;
 mod credential;
 mod origin;
 mod rules;
 
-pub use access::{Denial, READ_METHODS, authorize};
 pub use credential::Credential;
 pub use origin::Origin;
-pub use rules::{Body, Grant, HostPolicy, METHOD_OVERRIDES, Policy, Rule, validate_path};
+pub use rules::{
+    Body, Denial, Grant, HostPolicy, METHOD_OVERRIDES, Policy, READ_METHODS, Rule, matches,
+    validate_path,
+};
