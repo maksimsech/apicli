@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use apicli::{Failure, now, print_json};
-use apicli_policy::{Grant, Origin, Rule, authorize};
+use apicli_policy::{Bucket, Grant, Origin, Rule, Vault, authorize};
 use apicli_vault::Store;
 use serde::Serialize;
 
@@ -45,8 +45,8 @@ struct Explanation {
 
 pub fn hosts(json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
-    let vault = store.load()?;
-    let buckets = store.read_buckets();
+    let vault: Vault = store.load()?;
+    let buckets = store.read_buckets::<Bucket>();
     let now = now();
     let mut origins = BTreeMap::<&Origin, Vec<Secret>>::new();
     for credential in &vault.credentials {

@@ -14,7 +14,7 @@ use crate::{Failure, PasswordCommand};
 pub fn password(tool: &str, command: PasswordCommand) -> Result<u8, Failure> {
     require_terminal()?;
     let store = Store::open()?;
-    let mut vault = store.load()?;
+    let mut vault: Vault = store.load()?;
     let message = match command {
         PasswordCommand::Set => {
             if vault.admin.is_some() {

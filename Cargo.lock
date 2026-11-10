@@ -142,11 +142,10 @@ dependencies = [
 name = "apicli-vault"
 version = "0.0.0"
 dependencies = [
- "apicli-policy",
  "argon2",
  "aws-lc-rs",
  "directories",
- "secrecy",
+ "serde",
  "serde_json",
  "thiserror",
  "zeroize",

@@ -7,11 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-apicli-policy.workspace = true
 argon2 = "0.6"
 aws-lc-rs = "1.19"
 directories = "6.0"
-secrecy.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 zeroize = "1.8"

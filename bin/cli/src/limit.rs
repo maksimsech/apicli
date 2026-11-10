@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use apicli_policy::{Limits, Wait};
+use apicli_policy::{Bucket, Limits, Wait};
 use apicli_vault::Store;
 
 use crate::Failure;
@@ -18,7 +18,7 @@ pub fn take(
     let deadline = wait.map(|seconds| now().saturating_add((seconds.max(0.0) * 1000.0) as u64));
     loop {
         let current = now();
-        let result = store.update_buckets(|buckets| {
+        let result = store.update_buckets::<Bucket, _>(|buckets| {
             buckets
                 .entry(key.to_string())
                 .or_default()

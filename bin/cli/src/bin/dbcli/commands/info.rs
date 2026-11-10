@@ -1,5 +1,5 @@
 use apicli::{Failure, now, print_json};
-use apicli_policy::Connection;
+use apicli_policy::{Bucket, Connection, Vault};
 use apicli_vault::Store;
 use serde::Serialize;
 
@@ -41,7 +41,7 @@ struct Explanation {
 
 pub fn connections(json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
-    let vault = store.load()?;
+    let vault: Vault = store.load()?;
     if json {
         let listed = vault
             .connections
@@ -147,7 +147,7 @@ fn engine(connection: &Connection) -> Result<Engine, Failure> {
 
 fn remaining(store: &Store, connection: &Connection) -> Option<u32> {
     store
-        .read_buckets()
+        .read_buckets::<Bucket>()
         .get(&key(&connection.name))
         .cloned()
         .unwrap_or_default()

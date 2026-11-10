@@ -7,7 +7,7 @@ use std::{
 
 use apicli::{Entry, Failure, now, record, take};
 use apicli_policy::{
-    Body, Credential, Denial, Grant, METHOD_OVERRIDES, Origin, Redactor, UNRESERVED, Vault,
+    Body, Bucket, Credential, Denial, Grant, METHOD_OVERRIDES, Origin, Redactor, UNRESERVED, Vault,
     authorize,
 };
 use apicli_vault::Store;
@@ -128,7 +128,7 @@ pub async fn perform(
         let response = request.send().await.map_err(network)?;
         if response.status() == StatusCode::TOO_MANY_REQUESTS {
             let until = now().saturating_add(retry_after(&response));
-            store.update_buckets(|buckets| {
+            store.update_buckets::<Bucket, _>(|buckets| {
                 buckets
                     .entry(credential.origin.to_string())
                     .or_default()
