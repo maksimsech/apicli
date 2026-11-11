@@ -9,10 +9,10 @@ Both share one encrypted vault, admin password and log.
 
 ## Install
 
-Needs Rust 1.89 or newer. Run the same command again to upgrade.
+Needs Rust 1.89 or newer. Run the same command again to upgrade, and leave out a name to install one tool.
 
 ```sh
-cargo install --locked --git https://github.com/maksimsech/fieldkit
+cargo install --locked --git https://github.com/maksimsech/fieldkit apicli dbcli
 ```
 
 ## apicli
