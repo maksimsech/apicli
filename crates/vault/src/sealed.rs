@@ -5,7 +5,7 @@ use aws_lc_rs::{
 };
 use zeroize::Zeroizing;
 
-const AAD: &[u8] = b"apicli vault v1";
+const AAD: &[u8] = b"fieldkit vault v1";
 
 fn key(master: &[u8], purpose: &[u8]) -> Option<LessSafeKey> {
     let prk = Salt::new(HKDF_SHA256, &[]).extract(master);

@@ -1,0 +1,22 @@
+[package]
+name = "apicli"
+version = "0.1.0"
+description = "curl for APIs that need credentials, built for coding agents"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+clap.workspace = true
+fieldkit-common.workspace = true
+fieldkit-vault.workspace = true
+percent-encoding.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+tokio.workspace = true
+toml = "1.2"
+url.workspace = true

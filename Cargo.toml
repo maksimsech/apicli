@@ -1,7 +1,8 @@
 [workspace]
 members = [
-    "bin/cli",
-    "crates/core",
+    "bin/apicli",
+    "bin/dbcli",
+    "crates/common",
     "crates/vault",
 ]
 resolver = "3"
@@ -11,13 +12,15 @@ edition = "2024"
 rust-version = "1.89"
 license = "MIT"
 authors = ["Maksim Sech"]
-repository = "https://github.com/maksimsech/apicli"
+repository = "https://github.com/maksimsech/fieldkit"
 
 [workspace.dependencies]
-apicli-core = { path = "crates/core" }
-apicli-vault = { path = "crates/vault" }
+fieldkit-common = { path = "crates/common" }
+fieldkit-vault = { path = "crates/vault" }
 
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.6", features = ["derive"] }
 percent-encoding = "2.3"
 reqwest = { version = "0.13.5", default-features = false, features = [
     "rustls",

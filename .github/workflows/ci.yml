@@ -21,3 +21,62 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+
+  databases:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: dbcli-test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env:
+          CLICKHOUSE_USER: agent
+          CLICKHOUSE_PASSWORD: dbcli-test-password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user agent --password dbcli-test-password -q 'SELECT 1'"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+      mongo:
+        image: mongo:8.2
+        env:
+          MONGO_INITDB_ROOT_USERNAME: agent
+          MONGO_INITDB_ROOT_PASSWORD: dbcli-test-password
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DBCLI_TEST_POSTGRES: postgres://postgres:dbcli-test-password@localhost:5432/postgres
+      DBCLI_TEST_REDIS: redis://:dbcli-test-password@localhost:6379/0
+      DBCLI_TEST_MONGO: mongodb://agent:dbcli-test-password@localhost:27017/shop?authSource=admin
+      DBCLI_TEST_CASSANDRA: cassandra://agent:dbcli-test-password@localhost:9042
+      DBCLI_TEST_CLICKHOUSE: clickhouse://agent:dbcli-test-password@localhost:8123/default
+    steps:
+      - uses: actions/checkout@v5
+      - run: >-
+          docker run -d --name cassandra -p 9042:9042 -e MAX_HEAP_SIZE=1G -e HEAP_NEWSIZE=200M --entrypoint sh cassandra:5
+          -c "sed -i 's/^authenticator: AllowAllAuthenticator/authenticator: PasswordAuthenticator/' /etc/cassandra/cassandra.yaml && exec docker-entrypoint.sh cassandra -f"
+      - run: docker run -d --name redis -p 6379:6379 redis:8.2 redis-server --requirepass dbcli-test-password
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p dbcli --no-run
+      - run: for attempt in $(seq 30); do docker exec redis redis-cli -a dbcli-test-password --no-auth-warning ping && break; sleep 1; done
+      - run: for attempt in $(seq 60); do docker exec cassandra cqlsh -u cassandra -p cassandra -e "SELECT now() FROM system.local" && break; sleep 5; done
+      - run: docker exec cassandra cqlsh -u cassandra -p cassandra -e "CREATE ROLE IF NOT EXISTS agent WITH PASSWORD = 'dbcli-test-password' AND LOGIN = true AND SUPERUSER = true"
+      - run: cargo test --locked -p dbcli

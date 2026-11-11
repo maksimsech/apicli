@@ -8,24 +8,11 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
-use apicli_core::{Bucket, Vault};
 use directories::ProjectDirs;
-use thiserror::Error;
+use serde::{Serialize, de::DeserializeOwned};
 use zeroize::Zeroizing;
 
-use crate::sealed;
-
-#[derive(Debug, Error)]
-pub enum VaultError {
-    #[error("no home directory to keep apicli's files in")]
-    NoHome,
-    #[error("{0}")]
-    Crypto(String),
-    #[error("{0} can't be decrypted. Remove it to start over, which deletes every stored secret")]
-    Corrupt(PathBuf),
-    #[error("{0}")]
-    Io(#[from] io::Error),
-}
+use crate::{VaultError, sealed};
 
 pub struct Store {
     dir: PathBuf,
@@ -33,7 +20,7 @@ pub struct Store {
 
 impl Store {
     pub fn open() -> Result<Store, VaultError> {
-        let dirs = ProjectDirs::from("dev", "mngapp", "apicli").ok_or(VaultError::NoHome)?;
+        let dirs = ProjectDirs::from("dev", "mngapp", "fieldkit").ok_or(VaultError::NoHome)?;
         Ok(Store {
             dir: dirs.data_local_dir().to_path_buf(),
         })
@@ -43,9 +30,9 @@ impl Store {
         Store { dir }
     }
 
-    pub fn update_buckets<T>(
+    pub fn update_buckets<B: Serialize + DeserializeOwned, T>(
         &self,
-        change: impl FnOnce(&mut BTreeMap<String, Bucket>) -> T,
+        change: impl FnOnce(&mut BTreeMap<String, B>) -> T,
     ) -> Result<T, VaultError> {
         self.create_dir()?;
         let mut file = private_options()
@@ -62,7 +49,7 @@ impl Store {
         Ok(result)
     }
 
-    pub fn read_buckets(&self) -> BTreeMap<String, Bucket> {
+    pub fn read_buckets<B: DeserializeOwned>(&self) -> BTreeMap<String, B> {
         fs::read_to_string(self.dir.join("ratelimit.state"))
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
@@ -99,10 +86,10 @@ impl Store {
         }
     }
 
-    pub fn load(&self) -> Result<Vault, VaultError> {
+    pub fn load<V: DeserializeOwned + Default>(&self) -> Result<V, VaultError> {
         let path = self.vault_path();
         if !path.exists() {
-            return Ok(Vault::default());
+            return Ok(V::default());
         }
         let corrupt = || VaultError::Corrupt(path.clone());
         let key = self.read_key()?.ok_or_else(corrupt)?;
@@ -110,7 +97,7 @@ impl Store {
         serde_json::from_slice(&plain).map_err(|_| corrupt())
     }
 
-    pub fn save(&self, vault: &Vault) -> Result<(), VaultError> {
+    pub fn save<V: Serialize>(&self, vault: &V) -> Result<(), VaultError> {
         self.create_dir()?;
         let key = match self.read_key()? {
             Some(key) => key,
