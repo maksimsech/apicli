@@ -20,7 +20,7 @@ pub struct Store {
 
 impl Store {
     pub fn open() -> Result<Store, VaultError> {
-        let dirs = ProjectDirs::from("dev", "mngapp", "apicli").ok_or(VaultError::NoHome)?;
+        let dirs = ProjectDirs::from("dev", "mngapp", "fieldkit").ok_or(VaultError::NoHome)?;
         Ok(Store {
             dir: dirs.data_local_dir().to_path_buf(),
         })

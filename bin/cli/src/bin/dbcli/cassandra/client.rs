@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use apicli::Failure;
-use apicli_policy::Connection;
 use bytes::{Buf, Bytes, BytesMut};
+use fieldkit_policy::Connection;
 use secrecy::ExposeSecret;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},

@@ -1,5 +1,5 @@
 [package]
-name = "apicli-vault"
+name = "fieldkit-vault"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true

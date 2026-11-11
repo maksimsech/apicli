@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 
-use apicli_policy::{Admin, Vault};
-use apicli_vault::{Store, hash_password, verify_password};
+use fieldkit_policy::{Admin, Vault};
+use fieldkit_vault::{Store, hash_password, verify_password};
 use rpassword::prompt_password;
 use secrecy::{ExposeSecret, SecretString};
 

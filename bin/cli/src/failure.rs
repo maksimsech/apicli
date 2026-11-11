@@ -1,4 +1,4 @@
-use apicli_vault::VaultError;
+use fieldkit_vault::VaultError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

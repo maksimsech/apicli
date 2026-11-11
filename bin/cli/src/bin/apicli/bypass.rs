@@ -8,8 +8,8 @@ use std::{
 };
 
 use apicli::{Entry, Failure};
-use apicli_policy::{Credential, HostPolicy, Origin, Rate, Rule, Vault};
-use apicli_vault::Store;
+use fieldkit_policy::{Credential, HostPolicy, Origin, Rate, Rule, Vault};
+use fieldkit_vault::Store;
 use secrecy::SecretString;
 
 use crate::{cli::parse, request::perform};

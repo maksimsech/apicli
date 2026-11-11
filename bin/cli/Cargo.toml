@@ -20,8 +20,8 @@ rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs
 rustls-platform-verifier = "0.7.1"
 tokio-rustls = { version = "0.26.6", default-features = false }
 unicode-width = "0.2"
-apicli-policy.workspace = true
-apicli-vault.workspace = true
+fieldkit-policy.workspace = true
+fieldkit-vault.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.6", features = ["derive"] }
 directories = "6.0"

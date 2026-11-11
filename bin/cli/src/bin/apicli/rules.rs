@@ -9,8 +9,8 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 use apicli::{Failure, finish, open_for_change};
-use apicli_policy::{Origin, Policy, Rate, Rule, Vault};
-use apicli_vault::Store;
+use fieldkit_policy::{Origin, Policy, Rate, Rule, Vault};
+use fieldkit_vault::Store;
 
 use crate::cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand};
 

@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VaultError {
-    #[error("no home directory to keep apicli's files in")]
+    #[error("no home directory to keep fieldkit's files in")]
     NoHome,
     #[error("{0}")]
     Crypto(String),

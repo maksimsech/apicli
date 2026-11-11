@@ -1,5 +1,5 @@
 [package]
-name = "apicli-policy"
+name = "fieldkit-policy"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true

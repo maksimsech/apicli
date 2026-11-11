@@ -1,5 +1,5 @@
 use apicli::{Failure, finish, open_for_change, read_secret};
-use apicli_policy::Connection;
+use fieldkit_policy::Connection;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::{

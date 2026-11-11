@@ -4,8 +4,8 @@ use std::{
 };
 
 use apicli::{Entry, Failure, record};
-use apicli_policy::{Allow, Connection, Redactor, Vault};
-use apicli_vault::Store;
+use fieldkit_policy::{Allow, Connection, Redactor, Vault};
+use fieldkit_vault::Store;
 
 use crate::{
     cassandra, clickhouse, mongo, postgres, redis,

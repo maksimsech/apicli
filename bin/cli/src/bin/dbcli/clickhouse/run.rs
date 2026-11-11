@@ -7,8 +7,8 @@ use std::{
 };
 
 use apicli::Failure;
-use apicli_policy::Connection;
 use bytes::Bytes;
+use fieldkit_policy::Connection;
 use reqwest::{Certificate, Client, Error, redirect::Policy};
 use secrecy::ExposeSecret;
 use url::Url;

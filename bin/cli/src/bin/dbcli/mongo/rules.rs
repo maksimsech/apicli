@@ -1,4 +1,4 @@
-use apicli_policy::Allow;
+use fieldkit_policy::Allow;
 
 use crate::shared::glob;
 

@@ -1,7 +1,7 @@
 use std::mem::take;
 
 use apicli::Failure;
-use apicli_policy::Connection;
+use fieldkit_policy::Connection;
 use mongodb::bson::{Bson, Document, doc, oid::ObjectId};
 
 use super::{

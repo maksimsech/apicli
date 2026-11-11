@@ -1,5 +1,5 @@
 use apicli::Failure;
-use apicli_policy::Connection;
+use fieldkit_policy::Connection;
 
 use super::rules::find;
 use crate::shared::{Dialect, Statement, Token, not_allowed, quote, split, tokens, word};

@@ -3,8 +3,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use apicli_policy::{Bucket, Limits, Wait};
-use apicli_vault::Store;
+use fieldkit_policy::{Bucket, Limits, Wait};
+use fieldkit_vault::Store;
 
 use crate::Failure;
 

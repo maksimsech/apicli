@@ -1,5 +1,5 @@
 use apicli::{Failure, finish, open_for_change};
-use apicli_policy::Rate;
+use fieldkit_policy::Rate;
 
 use super::secret::unknown;
 use crate::{

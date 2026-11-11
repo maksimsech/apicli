@@ -6,11 +6,11 @@ use std::{
 };
 
 use apicli::{Entry, Failure, now, record, take};
-use apicli_policy::{
+use fieldkit_policy::{
     Body, Bucket, Credential, Denial, Grant, METHOD_OVERRIDES, Origin, Redactor, UNRESERVED, Vault,
     authorize,
 };
-use apicli_vault::Store;
+use fieldkit_vault::Store;
 use percent_encoding::percent_encode;
 use reqwest::{
     Client, Method, Response, StatusCode,

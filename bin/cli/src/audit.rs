@@ -1,7 +1,7 @@
 use std::io;
 
-use apicli_vault::Store;
 use chrono::{SecondsFormat, Utc};
+use fieldkit_vault::Store;
 use serde::{Deserialize, Serialize};
 
 use crate::{Failure, finish, open_for_change};

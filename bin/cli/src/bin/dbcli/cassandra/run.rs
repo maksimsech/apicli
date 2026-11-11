@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use apicli::Failure;
-use apicli_policy::Connection;
+use fieldkit_policy::Connection;
 use unicode_width::UnicodeWidthStr;
 
 use super::{

@@ -11,11 +11,11 @@ edition = "2024"
 rust-version = "1.89"
 license = "MIT"
 authors = ["Maksim Sech"]
-repository = "https://github.com/maksimsech/apicli"
+repository = "https://github.com/maksimsech/fieldkit"
 
 [workspace.dependencies]
-apicli-policy = { path = "crates/policy" }
-apicli-vault = { path = "crates/vault" }
+fieldkit-policy = { path = "crates/policy" }
+fieldkit-vault = { path = "crates/vault" }
 
 base64 = "0.22"
 percent-encoding = "2.3"

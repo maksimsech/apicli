@@ -1,6 +1,6 @@
 use apicli::{Failure, now, print_json};
-use apicli_policy::{Bucket, Connection, Vault};
-use apicli_vault::Store;
+use fieldkit_policy::{Bucket, Connection, Vault};
+use fieldkit_vault::Store;
 use serde::Serialize;
 
 use crate::{

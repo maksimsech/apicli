@@ -1,6 +1,6 @@
 use apicli::{Failure, authenticate, read_secret, require_terminal};
-use apicli_policy::{Credential, Origin, validate_path};
-use apicli_vault::Store;
+use fieldkit_policy::{Credential, Origin, validate_path};
+use fieldkit_vault::Store;
 use reqwest::header::{HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 

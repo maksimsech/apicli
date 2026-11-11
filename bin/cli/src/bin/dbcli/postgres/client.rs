@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, io, time::Duration};
 
 use apicli::Failure;
-use apicli_policy::Connection;
 use bytes::BytesMut;
 use fallible_iterator::FallibleIterator;
+use fieldkit_policy::Connection;
 use postgres_protocol::{
     IsNull,
     authentication::{

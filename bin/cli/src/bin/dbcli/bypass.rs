@@ -7,8 +7,8 @@ mod redis;
 use std::{env, fs, process};
 
 use apicli::Entry;
-use apicli_policy::{Allow, Connection, Rate, Vault};
-use apicli_vault::Store;
+use fieldkit_policy::{Allow, Connection, Rate, Vault};
+use fieldkit_vault::Store;
 use percent_encoding::percent_decode_str;
 use secrecy::SecretString;
 use url::Url;

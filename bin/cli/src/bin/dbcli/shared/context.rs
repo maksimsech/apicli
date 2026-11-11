@@ -1,9 +1,9 @@
 use std::{io::Write, iter::once};
 
 use apicli::{Entry, Failure, Refused, take, usage};
-use apicli_policy::{Connection, Redactor, Vault};
-use apicli_vault::Store;
 use clap::{ArgAction, Args, Parser, parser::ValueSource};
+use fieldkit_policy::{Connection, Redactor, Vault};
+use fieldkit_vault::Store;
 
 const MASK: &str = "[dbcli:redacted]";
 

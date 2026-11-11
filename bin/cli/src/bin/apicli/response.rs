@@ -5,7 +5,7 @@ use std::{
 };
 
 use apicli::{Entry, Failure};
-use apicli_policy::Redactor;
+use fieldkit_policy::Redactor;
 use reqwest::{Method, Response, Version, header::CONTENT_TYPE};
 
 use crate::{cli::RequestArgs, network::network};

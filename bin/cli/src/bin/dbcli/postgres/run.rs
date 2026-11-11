@@ -1,5 +1,5 @@
 use apicli::Failure;
-use apicli_policy::Connection;
+use fieldkit_policy::Connection;
 
 use super::{
     args::{PsqlArgs, parse},

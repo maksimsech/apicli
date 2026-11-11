@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use apicli::{Failure, now, print_json};
-use apicli_policy::{Bucket, Grant, Origin, Rule, Vault, authorize};
-use apicli_vault::Store;
+use fieldkit_policy::{Bucket, Grant, Origin, Rule, Vault, authorize};
+use fieldkit_vault::Store;
 use serde::Serialize;
 
 use crate::{
