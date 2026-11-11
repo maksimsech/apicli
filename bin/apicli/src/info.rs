@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
 
 use fieldkit_common::{Failure, now, print_json};
-use fieldkit_policy::{Bucket, Grant, Origin, Rule, Vault, authorize};
+use fieldkit_policy::{Bucket, Origin, Rule, Vault};
 use fieldkit_vault::Store;
 use serde::Serialize;
 
 use crate::{
+    access::{Grant, authorize},
     request::{denied, parse_url},
     secret::add_hint,
 };

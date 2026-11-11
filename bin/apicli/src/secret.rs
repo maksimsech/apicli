@@ -1,10 +1,10 @@
 use fieldkit_common::{Failure, authenticate, read_secret, require_terminal};
-use fieldkit_policy::{Credential, Origin, validate_path};
+use fieldkit_policy::{Credential, Origin};
 use fieldkit_vault::Store;
 use reqwest::header::{HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::cli::SecretCommand;
+use crate::{access::validate_path, cli::SecretCommand};
 
 pub fn add_hint(host: &str) -> String {
     format!("apicli secret add NAME --host {host} --header 'Authorization: Bearer {{secret}}'")

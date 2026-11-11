@@ -12,7 +12,10 @@ use fieldkit_common::{Failure, finish, open_for_change};
 use fieldkit_policy::{Origin, Policy, Rate, Rule, Vault};
 use fieldkit_vault::Store;
 
-use crate::cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand};
+use crate::{
+    access::{parse_policy, policy_toml, validate_rule},
+    cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand},
+};
 
 const DEFAULT_EDITOR: &str = if cfg!(windows) { "notepad" } else { "vi" };
 
@@ -36,7 +39,7 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
                 content_type,
                 allow_body,
             };
-            rule.validate().map_err(Failure::Usage)?;
+            validate_rule(&rule).map_err(Failure::Usage)?;
             let message = format!("Allowed {rule} on {origin}");
             let rules = &mut policy.hosts.entry(origin).or_default().allow;
             rules.retain(|existing| !same(existing, &rule.method, &rule.path));
@@ -72,7 +75,7 @@ pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
                 content_type: None,
                 allow_body: false,
             };
-            rule.validate().map_err(Failure::Usage)?;
+            validate_rule(&rule).map_err(Failure::Usage)?;
             let message = format!("Denied {rule} on {origin}");
             let rules = &mut policy.hosts.entry(origin).or_default().deny;
             rules.retain(|existing| !same(existing, &rule.method, &rule.path));
@@ -139,7 +142,7 @@ pub fn policy(command: PolicyCommand) -> Result<u8, Failure> {
             let vault = Store::open()?.load()?;
             print!(
                 "{}",
-                effective(&vault).to_toml().map_err(Failure::Integrity)?
+                policy_toml(&effective(&vault)).map_err(Failure::Integrity)?
             );
             Ok(0)
         }
@@ -177,7 +180,7 @@ fn effective(vault: &Vault) -> Policy {
 
 fn edit(policy: &Policy) -> Result<Policy, Failure> {
     let draft = env::temp_dir().join(format!("apicli-policy-{}.toml", process::id()));
-    let text = policy.to_toml().map_err(Failure::Integrity)?;
+    let text = policy_toml(policy).map_err(Failure::Integrity)?;
     fs::write(&draft, text).map_err(|error| Failure::Write(error.to_string()))?;
     let result = edit_loop(&draft);
     let _ = fs::remove_file(&draft);
@@ -198,7 +201,7 @@ fn edit_loop(draft: &Path) -> Result<Policy, Failure> {
             ));
         }
         let text = fs::read_to_string(draft).map_err(|error| Failure::Read(error.to_string()))?;
-        match Policy::parse(text.trim_start_matches('\u{feff}')) {
+        match parse_policy(text.trim_start_matches('\u{feff}')) {
             Ok(policy) => return Ok(policy),
             Err(error) => {
                 eprintln!("apicli: the policy is invalid: {error}");

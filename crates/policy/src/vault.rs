@@ -2,7 +2,7 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::{Credential, Origin, Policy, matches},
+    api::{Credential, Policy},
     db::Connection,
 };
 
@@ -39,22 +39,6 @@ impl Vault {
         self.credentials
             .iter()
             .find(|credential| credential.name == name)
-    }
-
-    pub fn credential(&self, origin: &Origin, path: &str) -> Option<&Credential> {
-        let mut hosted = self
-            .credentials
-            .iter()
-            .filter(|credential| &credential.origin == origin);
-        hosted
-            .clone()
-            .find(|credential| {
-                credential
-                    .paths
-                    .iter()
-                    .any(|pattern| matches(pattern, path, false))
-            })
-            .or_else(|| hosted.find(|credential| credential.paths.is_empty()))
     }
 
     pub fn find_mut(&mut self, name: &str) -> Option<&mut Credential> {

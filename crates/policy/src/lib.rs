@@ -1,4 +1,3 @@
-mod access;
 mod api;
 mod db;
 mod limit;
@@ -6,11 +5,7 @@ mod redact;
 mod secret;
 mod vault;
 
-pub use access::authorize;
-pub use api::{
-    Body, Credential, Denial, Grant, HostPolicy, METHOD_OVERRIDES, Origin, Policy, READ_METHODS,
-    Rule, validate_path,
-};
+pub use api::{Credential, HostPolicy, Origin, Policy, Rule};
 pub use db::{Allow, Connection};
 pub use limit::{Bucket, Limits, Rate, Wait};
 pub use redact::{Redactor, UNRESERVED};

@@ -6,10 +6,7 @@ use std::{
 };
 
 use fieldkit_common::{Entry, Failure, now, record, take};
-use fieldkit_policy::{
-    Body, Bucket, Credential, Denial, Grant, METHOD_OVERRIDES, Origin, Redactor, UNRESERVED, Vault,
-    authorize,
-};
+use fieldkit_policy::{Bucket, Credential, Origin, Redactor, UNRESERVED, Vault};
 use fieldkit_vault::Store;
 use percent_encoding::percent_encode;
 use reqwest::{
@@ -22,7 +19,13 @@ use reqwest::{
 use secrecy::ExposeSecret;
 use url::{ParseError, Url};
 
-use crate::{cli::RequestArgs, network::network, response, secret::add_hint};
+use crate::{
+    access::{Body, Denial, Grant, METHOD_OVERRIDES, authorize},
+    cli::RequestArgs,
+    network::network,
+    response,
+    secret::add_hint,
+};
 
 const MASK: &str = "[apicli:redacted]";
 

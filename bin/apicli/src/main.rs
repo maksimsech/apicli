@@ -1,3 +1,4 @@
+mod access;
 #[cfg(test)]
 mod bypass;
 mod cli;
