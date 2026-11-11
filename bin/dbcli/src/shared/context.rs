@@ -1,9 +1,10 @@
 use std::{io::Write, iter::once};
 
 use clap::{ArgAction, Args, Parser, parser::ValueSource};
-use fieldkit_common::{Entry, Failure, Refused, take, usage};
-use fieldkit_policy::{Connection, Redactor, Vault};
+use fieldkit_common::{Entry, Failure, Redactor, Refused, Vault, take, usage};
 use fieldkit_vault::Store;
+
+use super::config::Connection;
 
 const MASK: &str = "[dbcli:redacted]";
 

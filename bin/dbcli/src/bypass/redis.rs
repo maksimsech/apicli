@@ -1,6 +1,6 @@
 use secrecy::SecretString;
 
-use super::{Server, allow, limited, run, server, store, vault};
+use super::{Server, allow, config, limited, run, server, store};
 
 fn redis() -> Option<Server> {
     server("DBCLI_TEST_REDIS")
@@ -12,7 +12,7 @@ async fn refused_flags_and_commands_never_connect() {
         url: "redis://127.0.0.1:1/0".into(),
         password: "never-sent-123".into(),
     };
-    let reader = vault(&offline, allow(&[("SET", Some("*"))]));
+    let reader = config(&offline, allow(&[("SET", Some("*"))]));
     let store = store("redis-refused");
 
     for args in [
@@ -43,8 +43,8 @@ async fn reads_run_and_writes_need_a_matching_rule() {
     let Some(server) = redis() else {
         return;
     };
-    let writer = vault(&server, allow(&[("SET", Some("dbcli:rule:*"))]));
-    let reader = vault(&server, |_| {});
+    let writer = config(&server, allow(&[("SET", Some("dbcli:rule:*"))]));
+    let reader = config(&server, |_| {});
     let store = store("redis-rule");
 
     let seeded = run(&["SET", "dbcli:rule:a", "one"], &writer, &store).await;
@@ -72,7 +72,7 @@ async fn every_key_must_match_the_rule() {
     let Some(server) = redis() else {
         return;
     };
-    let writer = vault(&server, allow(&[("MSET", Some("dbcli:all:*"))]));
+    let writer = config(&server, allow(&[("MSET", Some("dbcli:all:*"))]));
     let store = store("redis-all-keys");
 
     let mixed = run(
@@ -99,7 +99,7 @@ async fn dangerous_and_scripting_reads_need_a_rule() {
     let Some(server) = redis() else {
         return;
     };
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
     let store = store("redis-dangerous");
 
     for args in [
@@ -125,8 +125,8 @@ async fn subcommand_rules_cover_only_their_subcommand() {
     let Some(server) = redis() else {
         return;
     };
-    let narrow = vault(&server, allow(&[("CONFIG|GET", None)]));
-    let wide = vault(&server, allow(&[("CONFIG", None)]));
+    let narrow = config(&server, allow(&[("CONFIG|GET", None)]));
+    let wide = config(&server, allow(&[("CONFIG", None)]));
     let store = store("redis-subcommand");
 
     let get = run(&["CONFIG", "GET", "maxmemory-samples"], &narrow, &store).await;
@@ -150,7 +150,7 @@ async fn password_is_masked_in_output_errors_and_log() {
         return;
     };
     let password = server.password.clone();
-    let writer = vault(
+    let writer = config(
         &server,
         allow(&[("SET", Some("dbcli:mask")), ("NOSUCHCMD", None)]),
     );
@@ -173,7 +173,7 @@ async fn wrong_password_fails_to_connect_with_a_hint() {
     let Some(server) = redis() else {
         return;
     };
-    let mut wrong = vault(&server, |_| {});
+    let mut wrong = config(&server, |_| {});
     wrong.connections[0].password = SecretString::from("not-the-password");
 
     let done = run(&["PING"], &wrong, &store("redis-wrong")).await;
@@ -191,11 +191,11 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
     let Some(server) = redis() else {
         return;
     };
-    let capped = vault(&server, |connection| {
+    let capped = config(&server, |connection| {
         allow(&[("INCR", Some("dbcli:rate"))])(connection);
         limited("3/min")(connection);
     });
-    let writer = vault(&server, allow(&[("DEL", Some("dbcli:rate"))]));
+    let writer = config(&server, allow(&[("DEL", Some("dbcli:rate"))]));
     let bucket = store("redis-rate");
     run(&["DEL", "dbcli:rate"], &writer, &store("redis-rate-setup")).await;
 

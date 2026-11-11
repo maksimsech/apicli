@@ -1,8 +1,8 @@
-use fieldkit_policy::Vault;
 use fieldkit_vault::Store;
 use secrecy::SecretString;
 
-use super::{Run, Server, allow, limited, run, server, store, vault};
+use super::{Run, Server, allow, config, limited, run, server, store};
+use crate::shared::Config;
 
 const KEYSPACE: &str = "dbcli_test";
 
@@ -10,12 +10,12 @@ fn cassandra() -> Option<Server> {
     server("DBCLI_TEST_CASSANDRA")
 }
 
-async fn cql(cql: &str, vault: &Vault, store: &Store) -> Run {
-    run(&["-e", cql], vault, store).await
+async fn cql(cql: &str, config: &Config, store: &Store) -> Run {
+    run(&["-e", cql], config, store).await
 }
 
-async fn setup(server: &Server, table: &str) -> (Vault, Store) {
-    let admin = vault(
+async fn setup(server: &Server, table: &str) -> (Config, Store) {
+    let admin = config(
         server,
         allow(&[
             ("CREATE", Some("*")),
@@ -36,8 +36,8 @@ async fn setup(server: &Server, table: &str) -> (Vault, Store) {
     (admin, store)
 }
 
-async fn count(table: &str, vault: &Vault, store: &Store) -> usize {
-    let done = cql(&format!("SELECT id FROM {KEYSPACE}.{table}"), vault, store).await;
+async fn count(table: &str, config: &Config, store: &Store) -> usize {
+    let done = cql(&format!("SELECT id FROM {KEYSPACE}.{table}"), config, store).await;
     done.out
         .lines()
         .filter(|line| line.trim().parse::<i32>().is_ok())
@@ -50,7 +50,7 @@ async fn refused_flags_and_cqlsh_commands_never_connect() {
         url: "cassandra://agent@127.0.0.1:1".into(),
         password: "never-sent-123".into(),
     };
-    let writer = vault(&offline, allow(&[("INSERT", Some("*")), ("SELEC", None)]));
+    let writer = config(&offline, allow(&[("INSERT", Some("*")), ("SELEC", None)]));
     let store = store("cassandra-refused");
 
     for args in [
@@ -78,11 +78,11 @@ async fn reads_run_and_writes_need_a_matching_rule() {
     };
     let table = "dbcli_rule";
     let (_, store) = setup(&server, table).await;
-    let writer = vault(
+    let writer = config(
         &server,
         allow(&[("INSERT", Some(&format!("{KEYSPACE}.dbcli_rule")))]),
     );
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
     let insert = |id: i32| format!("INSERT INTO {KEYSPACE}.{table} (id) VALUES ({id})");
 
     let denied = cql(&insert(1), &reader, &store).await;
@@ -140,7 +140,7 @@ async fn every_statement_in_a_batch_must_be_allowed() {
     };
     let table = "dbcli_batch";
     let (_, store) = setup(&server, table).await;
-    let writer = vault(
+    let writer = config(
         &server,
         allow(&[("INSERT", Some(&format!("{KEYSPACE}.{table}")))]),
     );
@@ -174,7 +174,7 @@ async fn a_denied_statement_stops_every_statement() {
     };
     let table = "dbcli_all";
     let (_, store) = setup(&server, table).await;
-    let writer = vault(
+    let writer = config(
         &server,
         allow(&[("INSERT", Some(&format!("{KEYSPACE}.{table}")))]),
     );
@@ -241,7 +241,7 @@ async fn wrong_password_fails_to_connect_with_a_hint() {
     let Some(server) = cassandra() else {
         return;
     };
-    let mut wrong = vault(&server, |_| {});
+    let mut wrong = config(&server, |_| {});
     wrong.connections[0].password = SecretString::from("not-the-password");
 
     let done = cql(
@@ -267,7 +267,7 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
     let table = "dbcli_rate";
     let (admin, setup_store) = setup(&server, table).await;
     let target = format!("{KEYSPACE}.{table}");
-    let capped = vault(&server, |connection| {
+    let capped = config(&server, |connection| {
         allow(&[("INSERT", Some(&target))])(connection);
         limited("3/min")(connection);
     });

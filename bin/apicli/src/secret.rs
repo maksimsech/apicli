@@ -1,10 +1,14 @@
 use fieldkit_common::{Failure, authenticate, read_secret, require_terminal};
-use fieldkit_policy::{Credential, Origin};
 use fieldkit_vault::Store;
 use reqwest::header::{HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::{access::validate_path, cli::SecretCommand};
+use crate::{
+    access::validate_path,
+    cli::SecretCommand,
+    config::{Config, Credential},
+    origin::Origin,
+};
 
 pub fn add_hint(host: &str) -> String {
     format!("apicli secret add NAME --host {host} --header 'Authorization: Bearer {{secret}}'")
@@ -15,6 +19,7 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
     let store = Store::open()?;
     let mut vault = store.load()?;
     authenticate("apicli", &store, &mut vault)?;
+    let mut config = Config::load(&vault)?;
     let message = match command {
         SecretCommand::Add {
             name,
@@ -27,13 +32,13 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
             for path in &paths {
                 validate_path(path).map_err(Failure::Usage)?;
             }
-            if vault.find(&name).is_some() {
+            if config.find(&name).is_some() {
                 return Err(Failure::Usage(format!(
                     "{name} already exists, use apicli secret rotate {name}"
                 )));
             }
             if paths.is_empty()
-                && let Some(existing) = vault
+                && let Some(existing) = config
                     .credentials
                     .iter()
                     .find(|credential| credential.origin == origin && credential.paths.is_empty())
@@ -49,7 +54,7 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
             } else {
                 format!(" on {}", paths.join(", "))
             };
-            vault.credentials.push(Credential {
+            config.credentials.push(Credential {
                 name: name.clone(),
                 origin: origin.clone(),
                 paths,
@@ -60,21 +65,22 @@ pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
             format!("Added {name} for {origin}{scope}")
         }
         SecretCommand::Rotate { name } => {
-            let credential = vault.find_mut(&name).ok_or_else(|| unknown(&name))?;
+            let credential = config.find_mut(&name).ok_or_else(|| unknown(&name))?;
             credential.secret = prompt_secret(&name, &credential.template)?;
             format!("Rotated {name}")
         }
         SecretCommand::Rm { name } => {
-            let count = vault.credentials.len();
-            vault
+            let count = config.credentials.len();
+            config
                 .credentials
                 .retain(|credential| credential.name != name);
-            if vault.credentials.len() == count {
+            if config.credentials.len() == count {
                 return Err(unknown(&name));
             }
             format!("Removed {name}")
         }
     };
+    config.save(&mut vault)?;
     store.save(&vault)?;
     println!("{message}");
     Ok(0)

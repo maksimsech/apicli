@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 use mongodb::{
     Client,
     bson::{Bson, Document, doc},
@@ -16,7 +15,7 @@ use super::{
     parse::parse,
     plan::{Bulked, Plan, Shape, Step, check, plan},
 };
-use crate::shared::{ConnectionUrl, Context, rotate_hint, summary};
+use crate::shared::{Connection, ConnectionUrl, Context, rotate_hint, summary};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const BATCH: usize = 20;

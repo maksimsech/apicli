@@ -1,11 +1,10 @@
-use fieldkit_common::{Failure, now, print_json};
-use fieldkit_policy::{Bucket, Connection, Vault};
+use fieldkit_common::{Bucket, Failure, now, print_json};
 use fieldkit_vault::Store;
 use serde::Serialize;
 
 use crate::{
     call::{self, Engine, find, scrub},
-    shared::{add_hint, key, redactor},
+    shared::{Config, Connection, add_hint, key, redactor},
 };
 
 #[derive(Serialize)]
@@ -41,9 +40,9 @@ struct Explanation {
 
 pub fn connections(json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
-    let vault: Vault = store.load()?;
+    let config = Config::load(&store.load()?)?;
     if json {
-        let listed = vault
+        let listed = config
             .connections
             .iter()
             .map(|connection| {
@@ -60,13 +59,13 @@ pub fn connections(json: bool) -> Result<u8, Failure> {
             })
             .collect::<Result<Vec<_>, Failure>>()?;
         print_json(&listed)?;
-    } else if vault.connections.is_empty() {
+    } else if config.connections.is_empty() {
         println!(
             "No connections are configured. The user can add one with: {}",
             add_hint("NAME")
         );
     } else {
-        for connection in &vault.connections {
+        for connection in &config.connections {
             println!("{}", connection.name);
             println!("  url: {}", connection.url);
             let engine = engine(connection)?;
@@ -90,6 +89,7 @@ pub fn connections(json: bool) -> Result<u8, Failure> {
 pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
+    let config = Config::load(&vault)?;
     let mut explanation = Explanation {
         allowed: false,
         connection: name.to_string(),
@@ -100,7 +100,7 @@ pub async fn explain(name: &str, args: &[String], json: bool) -> Result<u8, Fail
         remaining: None,
         reason: None,
     };
-    let code = match find(&vault, name) {
+    let code = match find(&config, name) {
         Ok(connection) => {
             explanation.url = Some(connection.url.clone());
             explanation.engine = Engine::of(&connection.url).ok().map(Engine::name);

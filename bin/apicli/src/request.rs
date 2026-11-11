@@ -5,8 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use fieldkit_common::{Entry, Failure, now, record, take};
-use fieldkit_policy::{Bucket, Credential, Origin, Redactor, UNRESERVED, Vault};
+use fieldkit_common::{Bucket, Entry, Failure, Redactor, UNRESERVED, Vault, now, record, take};
 use fieldkit_vault::Store;
 use percent_encoding::percent_encode;
 use reqwest::{
@@ -22,7 +21,9 @@ use url::{ParseError, Url};
 use crate::{
     access::{Body, Denial, Grant, METHOD_OVERRIDES, authorize},
     cli::RequestArgs,
+    config::{Config, Credential},
     network::network,
+    origin::Origin,
     response,
     secret::add_hint,
 };
@@ -32,9 +33,18 @@ const MASK: &str = "[apicli:redacted]";
 pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
+    let config = Config::load(&vault)?;
     let mut entry = Entry::start();
     let started = Instant::now();
-    let result = perform(&args, &store, &vault, &mut stdout().lock(), &mut entry).await;
+    let result = perform(
+        &args,
+        &store,
+        &vault,
+        &config,
+        &mut stdout().lock(),
+        &mut entry,
+    )
+    .await;
     entry.ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match &result {
         Ok(_) => entry.outcome = "sent".into(),
@@ -43,7 +53,7 @@ pub async fn send(args: RequestArgs) -> Result<u8, Failure> {
             entry.error = failure.to_string().lines().next().map(String::from);
         }
     }
-    record("apicli", &store, &entry, vault.policy.log_limit_mb);
+    record("apicli", &store, &entry, vault.log_limit_mb);
     result
 }
 
@@ -51,6 +61,7 @@ pub async fn perform(
     args: &RequestArgs,
     store: &Store,
     vault: &Vault,
+    config: &Config,
     stdout: &mut dyn Write,
     entry: &mut Entry,
 ) -> Result<u8, Failure> {
@@ -102,8 +113,8 @@ pub async fn perform(
                 .get(CONTENT_TYPE)
                 .and_then(|value| value.to_str().ok()),
         });
-        let (credential, grant) = authorize(&url, method.as_str(), view, vault)
-            .map_err(|denial| denied(denial, &url, method.as_str(), vault))?;
+        let (credential, grant) = authorize(&url, method.as_str(), view, config)
+            .map_err(|denial| denied(denial, &url, method.as_str(), config))?;
         entry.rule = Some(match grant {
             Grant::Default => "default".into(),
             Grant::Rule(rule) => format!("allow {rule}"),
@@ -113,10 +124,10 @@ pub async fn perform(
             store,
             &origin,
             &origin,
-            &vault.policy.host(&credential.origin).limits(),
+            &config.policy.host(&credential.origin).limits(),
             args.wait,
         )?;
-        let request_headers = with_credential(&headers, credential, vault)?;
+        let request_headers = with_credential(&headers, credential, config)?;
         if args.verbose {
             for line in request_lines(&method, &url, &request_headers) {
                 eprintln!("{}", redactor.redact_str(&line));
@@ -182,7 +193,7 @@ fn redirect_target(response: &Response) -> Option<Url> {
     response.url().join(location).ok()
 }
 
-pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault) -> Failure {
+pub fn denied(denial: Denial, url: &Url, method: &str, config: &Config) -> Failure {
     let origin = Origin::of(url).map_or_else(|| url.to_string(), |origin| origin.to_string());
     let path = url.path();
     match denial {
@@ -201,7 +212,7 @@ pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault) -> Failure
         }
         Denial::NotAllowed => {
             let allowed = Origin::of(url)
-                .map(|origin| vault.policy.host(&origin).summary())
+                .map(|origin| config.policy.host(&origin).summary())
                 .unwrap_or_default();
             Failure::Denied(format!(
                 "denied: {method} {path} on {origin}\nallowed here: {allowed}\nto allow it, the user can run: apicli allow add {origin} {method} '{path}'"
@@ -212,7 +223,7 @@ pub fn denied(denial: Denial, url: &Url, method: &str, vault: &Vault) -> Failure
             add_hint(&origin)
         )),
         Denial::Unconfigured(origin) => {
-            let configured = vault
+            let configured = config
                 .credentials
                 .iter()
                 .map(|credential| credential.origin.to_string())
@@ -247,9 +258,9 @@ fn check_overrides(headers: &HeaderMap) -> Result<(), Failure> {
 fn with_credential(
     headers: &HeaderMap,
     credential: &Credential,
-    vault: &Vault,
+    config: &Config,
 ) -> Result<HeaderMap, Failure> {
-    for added in vault
+    for added in config
         .credentials
         .iter()
         .filter(|added| added.origin == credential.origin)

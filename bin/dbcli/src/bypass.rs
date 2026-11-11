@@ -6,8 +6,7 @@ mod redis;
 
 use std::{env, fs, process};
 
-use fieldkit_common::Entry;
-use fieldkit_policy::{Allow, Connection, Rate, Vault};
+use fieldkit_common::{Entry, Rate, Vault};
 use fieldkit_vault::Store;
 use percent_encoding::percent_decode_str;
 use secrecy::SecretString;
@@ -15,7 +14,7 @@ use url::Url;
 
 use crate::{
     call::{parse, perform},
-    shared::Context,
+    shared::{Allow, Config, Connection, Context},
 };
 
 struct Server {
@@ -48,16 +47,15 @@ fn server(variable: &str) -> Option<Server> {
     })
 }
 
-fn vault(server: &Server, configure: impl FnOnce(&mut Connection)) -> Vault {
+fn config(server: &Server, configure: impl FnOnce(&mut Connection)) -> Config {
     let mut connection = Connection::new(
         "test".into(),
         server.url.clone(),
         SecretString::from(server.password.clone()),
     );
     configure(&mut connection);
-    Vault {
+    Config {
         connections: vec![connection],
-        ..Vault::default()
     }
 }
 
@@ -87,13 +85,15 @@ fn store(name: &str) -> Store {
     Store::at(dir)
 }
 
-async fn run(args: &[&str], vault: &Vault, store: &Store) -> Run {
+async fn run(args: &[&str], config: &Config, store: &Store) -> Run {
     let args = args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
     let mut out = Vec::new();
     let mut err = Vec::new();
     let mut entry = Entry::default();
-    let mut context = Context::new(store, vault, &mut out, &mut err, &mut entry, false);
-    let result = perform("test", &args, vault, &mut context).await;
+    let mut vault = Vault::default();
+    config.save(&mut vault).unwrap();
+    let mut context = Context::new(store, &vault, &mut out, &mut err, &mut entry, false);
+    let result = perform("test", &args, config, &mut context).await;
     let mut err = String::from_utf8_lossy(&err).into_owned();
     let code = match result {
         Ok(code) => code,

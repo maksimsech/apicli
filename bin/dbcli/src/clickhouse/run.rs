@@ -8,15 +8,14 @@ use std::{
 
 use bytes::Bytes;
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 use reqwest::{Certificate, Client, Error, redirect::Policy};
 use secrecy::ExposeSecret;
 use url::Url;
 
 use super::args::{ClientArgs, parse};
 use crate::shared::{
-    COMMITS, ConnectionUrl, Context, Dialect, Statement, Tls, flag, read_only, rotate_hint, split,
-    tokens, word, writes,
+    COMMITS, Connection, ConnectionUrl, Context, Dialect, Statement, Tls, flag, read_only,
+    rotate_hint, split, tokens, word, writes,
 };
 
 const READONLY: &str = "164";

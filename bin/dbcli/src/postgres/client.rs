@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, io, time::Duration};
 use bytes::BytesMut;
 use fallible_iterator::FallibleIterator;
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 use postgres_protocol::{
     IsNull,
     authentication::{
@@ -23,7 +22,7 @@ use tokio::{
 use unicode_width::UnicodeWidthStr;
 
 use super::output::Column;
-use crate::shared::{ConnectionUrl, Io, Tls, dial, lost, rotate_hint, secure};
+use crate::shared::{Connection, ConnectionUrl, Io, Tls, dial, lost, rotate_hint, secure};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STATEMENT_TIMEOUT: &str = "60s";

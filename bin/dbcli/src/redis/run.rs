@@ -1,7 +1,6 @@
 use std::io::{Read, stdin};
 
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 
 use super::{
     args::{RedisArgs, parse},
@@ -9,7 +8,7 @@ use super::{
     reply::{Mode, Reply, format, lossy, repr},
     rules::find,
 };
-use crate::shared::{ConnectionUrl, Context, not_allowed, quote};
+use crate::shared::{Connection, ConnectionUrl, Context, not_allowed, quote};
 
 const READS: [&str; 2] = ["PING", "INFO"];
 

@@ -101,7 +101,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "fieldkit-common",
- "fieldkit-policy",
  "fieldkit-vault",
  "percent-encoding",
  "reqwest",
@@ -611,7 +610,6 @@ dependencies = [
  "clap",
  "fallible-iterator",
  "fieldkit-common",
- "fieldkit-policy",
  "fieldkit-vault",
  "mongodb",
  "percent-encoding",
@@ -738,28 +736,18 @@ checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 name = "fieldkit-common"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "clap",
  "directories",
- "fieldkit-policy",
  "fieldkit-vault",
  "libc",
+ "percent-encoding",
  "rpassword",
  "secrecy",
  "serde",
  "serde_json",
  "thiserror",
-]
-
-[[package]]
-name = "fieldkit-policy"
-version = "0.0.0"
-dependencies = [
- "base64 0.22.1",
- "percent-encoding",
- "secrecy",
- "serde",
- "url",
 ]
 
 [[package]]

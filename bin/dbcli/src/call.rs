@@ -3,25 +3,25 @@ use std::{
     time::Instant,
 };
 
-use fieldkit_common::{Entry, Failure, record};
-use fieldkit_policy::{Allow, Connection, Redactor, Vault};
+use fieldkit_common::{Entry, Failure, Redactor, record};
 use fieldkit_vault::Store;
 
 use crate::{
     cassandra, clickhouse, mongo, postgres, redis,
-    shared::{ConnectionUrl, Context, add_hint, flag},
+    shared::{Allow, Config, Connection, ConnectionUrl, Context, add_hint, flag},
 };
 
 pub async fn send(name: &str, args: &[String]) -> Result<u8, Failure> {
     let store = Store::open()?;
     let vault = store.load()?;
+    let config = Config::load(&vault)?;
     let mut entry = Entry::start();
     let started = Instant::now();
     let terminal = stdout().is_terminal();
     let mut out = stdout().lock();
     let mut err = stderr().lock();
     let mut context = Context::new(&store, &vault, &mut out, &mut err, &mut entry, terminal);
-    let result = perform(name, args, &vault, &mut context).await;
+    let result = perform(name, args, &config, &mut context).await;
     entry.ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match &result {
         Ok(_) => entry.outcome = "sent".into(),
@@ -30,18 +30,18 @@ pub async fn send(name: &str, args: &[String]) -> Result<u8, Failure> {
             entry.error = failure.to_string().lines().next().map(String::from);
         }
     }
-    record("dbcli", &store, &entry, vault.policy.log_limit_mb);
+    record("dbcli", &store, &entry, vault.log_limit_mb);
     result
 }
 
 pub async fn perform(
     name: &str,
     args: &[String],
-    vault: &Vault,
+    config: &Config,
     context: &mut Context<'_>,
 ) -> Result<u8, Failure> {
     context.entry.connection = Some(name.to_string());
-    let connection = find(vault, name)?;
+    let connection = find(config, name)?;
     let (engine, url) = target(connection)?;
     let result = match engine {
         Engine::Postgres => postgres::run(connection, &url, args, context).await,
@@ -159,9 +159,9 @@ fn target(connection: &Connection) -> Result<(Engine, ConnectionUrl), Failure> {
     Ok((engine, engine.parse(&connection.url).map_err(stored)?))
 }
 
-pub fn find<'a>(vault: &'a Vault, name: &str) -> Result<&'a Connection, Failure> {
-    vault.connection(name).ok_or_else(|| {
-        let names = vault
+pub fn find<'a>(config: &'a Config, name: &str) -> Result<&'a Connection, Failure> {
+    config.connection(name).ok_or_else(|| {
+        let names = config
             .connections
             .iter()
             .map(|connection| connection.name.as_str())

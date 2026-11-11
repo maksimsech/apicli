@@ -1,6 +1,4 @@
-use fieldkit_policy::Allow;
-
-use crate::shared::glob;
+use crate::shared::{Allow, glob};
 
 pub fn rule(action: &str, target: Option<&str>) -> Result<Allow, String> {
     let valid = action.split('|').count() <= 2

@@ -1,8 +1,8 @@
-use fieldkit_policy::Vault;
 use fieldkit_vault::Store;
 use secrecy::SecretString;
 
-use super::{Run, Server, allow, limited, run, server, store, vault};
+use super::{Run, Server, allow, config, limited, run, server, store};
+use crate::shared::Config;
 
 fn mongo() -> Option<Server> {
     server("DBCLI_TEST_MONGO")
@@ -15,10 +15,10 @@ fn eval(expressions: &[&str]) -> Vec<String> {
         .collect()
 }
 
-async fn evaluate(expressions: &[&str], vault: &Vault, store: &Store) -> Run {
+async fn evaluate(expressions: &[&str], config: &Config, store: &Store) -> Run {
     let args = eval(expressions);
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    run(&args, vault, store).await
+    run(&args, config, store).await
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -27,7 +27,7 @@ async fn javascript_and_refused_flags_never_connect() {
         url: "mongodb://agent@127.0.0.1:1/shop".into(),
         password: "never-sent-123".into(),
     };
-    let writer = vault(
+    let writer = config(
         &offline,
         allow(&[("insert", Some("*")), ("delete", Some("*"))]),
     );
@@ -75,14 +75,14 @@ async fn reads_run_and_writes_need_a_matching_rule() {
         return;
     };
     let db = server.database();
-    let writer = vault(
+    let writer = config(
         &server,
         allow(&[
             ("insert", Some(&format!("{db}.dbcli_rule*"))),
             ("drop", Some("*")),
         ]),
     );
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
     let store = store("mongo-rule");
     evaluate(&["db.dbcli_rule.drop()"], &writer, &store).await;
 
@@ -121,7 +121,7 @@ async fn aggregate_out_and_run_command_writes_are_denied() {
     let Some(server) = mongo() else {
         return;
     };
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
     let store = store("mongo-commands");
 
     for expression in [
@@ -149,7 +149,7 @@ async fn a_denied_expression_stops_every_expression() {
         return;
     };
     let db = server.database();
-    let writer = vault(
+    let writer = config(
         &server,
         allow(&[
             ("insert", Some(&format!("{db}.dbcli_all"))),
@@ -181,7 +181,7 @@ async fn password_is_masked_in_output_errors_and_log() {
     };
     let db = server.database();
     let password = server.password.clone();
-    let writer = vault(
+    let writer = config(
         &server,
         allow(&[
             ("insert", Some(&format!("{db}.dbcli_mask"))),
@@ -210,7 +210,7 @@ async fn wrong_password_fails_to_connect_with_a_hint() {
     let Some(server) = mongo() else {
         return;
     };
-    let mut wrong = vault(&server, |_| {});
+    let mut wrong = config(&server, |_| {});
     wrong.connections[0].password = SecretString::from("not-the-password");
 
     let done = evaluate(&["db.runCommand({ping: 1})"], &wrong, &store("mongo-wrong")).await;
@@ -234,11 +234,11 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
         .iter()
         .map(|(action, target)| (*action, Some(target.as_str())))
         .collect::<Vec<_>>();
-    let capped = vault(&server, |connection| {
+    let capped = config(&server, |connection| {
         allow(&rules)(connection);
         limited("3/min")(connection);
     });
-    let writer = vault(&server, allow(&rules));
+    let writer = config(&server, allow(&rules));
     evaluate(
         &["db.dbcli_rate.drop()"],
         &writer,

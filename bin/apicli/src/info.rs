@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
-use fieldkit_common::{Failure, now, print_json};
-use fieldkit_policy::{Bucket, Origin, Rule, Vault};
+use fieldkit_common::{Bucket, Failure, now, print_json};
 use fieldkit_vault::Store;
 use serde::Serialize;
 
 use crate::{
     access::{Grant, authorize},
+    config::{Config, Rule},
+    origin::Origin,
     request::{denied, parse_url},
     secret::add_hint,
 };
@@ -46,11 +47,11 @@ struct Explanation {
 
 pub fn hosts(json: bool) -> Result<u8, Failure> {
     let store = Store::open()?;
-    let vault: Vault = store.load()?;
+    let config = Config::load(&store.load()?)?;
     let buckets = store.read_buckets::<Bucket>();
     let now = now();
     let mut origins = BTreeMap::<&Origin, Vec<Secret>>::new();
-    for credential in &vault.credentials {
+    for credential in &config.credentials {
         origins.entry(&credential.origin).or_default().push(Secret {
             name: credential.name.clone(),
             header: credential.header.clone(),
@@ -60,7 +61,7 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
     let hosts = origins
         .into_iter()
         .map(|(origin, credentials)| {
-            let rules = vault.policy.host(origin);
+            let rules = config.policy.host(origin);
             Host {
                 host: origin.to_string(),
                 credentials,
@@ -115,7 +116,7 @@ pub fn hosts(json: bool) -> Result<u8, Failure> {
 }
 
 pub fn explain(method: &str, url: &str, json: bool) -> Result<u8, Failure> {
-    let vault = Store::open()?.load()?;
+    let config = Config::load(&Store::open()?.load()?)?;
     let url = parse_url(url)?;
     let mut explanation = Explanation {
         allowed: false,
@@ -125,21 +126,21 @@ pub fn explain(method: &str, url: &str, json: bool) -> Result<u8, Failure> {
         rule: None,
         reason: None,
     };
-    let code = match authorize(&url, method, None, &vault) {
+    let code = match authorize(&url, method, None, &config) {
         Ok((credential, grant)) => {
             explanation.allowed = true;
             explanation.credential = Some(format!("{} ({})", credential.name, credential.header));
             explanation.rule = Some(match grant {
                 Grant::Default => format!(
                     "allowed: {}",
-                    vault.policy.host(&credential.origin).methods.join(", ")
+                    config.policy.host(&credential.origin).methods.join(", ")
                 ),
                 Grant::Rule(rule) => format!("allow: {}", describe(&rule)),
             });
             0
         }
         Err(denial) => {
-            let failure = denied(denial, &url, method, &vault);
+            let failure = denied(denial, &url, method, &config);
             explanation.reason = Some(failure.to_string());
             failure.code()
         }

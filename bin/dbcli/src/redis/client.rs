@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use bytes::{Buf, BytesMut};
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 use secrecy::ExposeSecret;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -10,7 +9,7 @@ use tokio::{
 };
 
 use super::reply::{Parser, Reply, lossy};
-use crate::shared::{ConnectionUrl, Io, Tls, dial, lost, rotate_hint, secure};
+use crate::shared::{Connection, ConnectionUrl, Io, Tls, dial, lost, rotate_hint, secure};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 

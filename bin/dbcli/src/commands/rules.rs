@@ -1,14 +1,15 @@
-use fieldkit_common::{Failure, finish, open_for_change};
-use fieldkit_policy::Rate;
+use fieldkit_common::{Failure, Rate, finish, open_for_change};
 
 use super::secret::unknown;
 use crate::{
     call::Engine,
     cli::{AllowCommand, LimitCommand},
+    shared::Config,
 };
 
 pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("dbcli")?;
+    let mut config = Config::load(&vault)?;
     let (name, action, target, add) = match command {
         AllowCommand::Add {
             name,
@@ -21,7 +22,7 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
             target,
         } => (name, action, target, false),
     };
-    let connection = vault.connection_mut(&name).ok_or_else(|| unknown(&name))?;
+    let connection = config.connection_mut(&name).ok_or_else(|| unknown(&name))?;
     let engine = Engine::of(&connection.url).map_err(Failure::Integrity)?;
     let rule = engine.rule(&name, &action, target.as_deref());
     let message = if engine.write_flag() {
@@ -62,11 +63,13 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
             }
         }
     };
+    config.save(&mut vault)?;
     finish(&store, &vault, &message)
 }
 
 pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("dbcli")?;
+    let mut config = Config::load(&vault)?;
     let message = match command {
         LimitCommand::Set {
             name,
@@ -75,14 +78,14 @@ pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
             daily,
         } => {
             let rate = Rate::parse(&rate).map_err(Failure::Usage)?;
-            let connection = vault.connection_mut(&name).ok_or_else(|| unknown(&name))?;
+            let connection = config.connection_mut(&name).ok_or_else(|| unknown(&name))?;
             connection.rate = Some(rate);
             connection.burst = burst;
             connection.daily = daily;
             format!("Limited {name} to {}", connection.limits())
         }
         LimitCommand::Rm { name } => {
-            let connection = vault.connection_mut(&name).ok_or_else(|| unknown(&name))?;
+            let connection = config.connection_mut(&name).ok_or_else(|| unknown(&name))?;
             if connection.rate.is_none() && connection.daily.is_none() {
                 return Err(Failure::Usage(format!(
                     "{name} has no limits, run dbcli connections to list them"
@@ -94,5 +97,6 @@ pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
             format!("Removed the limits on {name}")
         }
     };
+    config.save(&mut vault)?;
     finish(&store, &vault, &message)
 }

@@ -98,7 +98,7 @@ pub fn log(tail: usize, json: bool) -> Result<u8, Failure> {
 
 pub fn log_limit(tool: &str, mb: u32) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change(tool)?;
-    vault.policy.log_limit_mb = mb;
+    vault.log_limit_mb = mb;
     finish(
         &store,
         &vault,

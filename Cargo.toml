@@ -3,7 +3,6 @@ members = [
     "bin/apicli",
     "bin/dbcli",
     "crates/common",
-    "crates/policy",
     "crates/vault",
 ]
 resolver = "3"
@@ -17,7 +16,6 @@ repository = "https://github.com/maksimsech/fieldkit"
 
 [workspace.dependencies]
 fieldkit-common = { path = "crates/common" }
-fieldkit-policy = { path = "crates/policy" }
 fieldkit-vault = { path = "crates/vault" }
 
 base64 = "0.22"

@@ -1,3 +1,4 @@
+mod config;
 mod context;
 mod glob;
 mod messages;
@@ -6,6 +7,7 @@ mod text;
 mod tls;
 mod url;
 
+pub use config::{Allow, Config, Connection};
 pub use context::{Common, Context, engine_args, key, redactor};
 pub use glob::glob;
 pub use messages::{COMMITS, add_hint, flag, not_allowed, read_only, rotate_hint, summary, writes};

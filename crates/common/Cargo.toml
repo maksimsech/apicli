@@ -7,11 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
 directories = "6.0"
-fieldkit-policy.workspace = true
 fieldkit-vault.workspace = true
+percent-encoding.workspace = true
 rpassword = "7.4"
 secrecy.workspace = true
 serde.workspace = true

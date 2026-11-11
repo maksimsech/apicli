@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 use unicode_width::UnicodeWidthStr;
 
 use super::{
@@ -10,7 +9,7 @@ use super::{
     cql::{Action, Local, Step, plan, protect},
     value::{format, text},
 };
-use crate::shared::{ConnectionUrl, Context, summary};
+use crate::shared::{Connection, ConnectionUrl, Context, summary};
 
 const LEVELS: [(&str, u16); 11] = [
     ("ANY", 0x0000),

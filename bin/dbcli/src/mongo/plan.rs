@@ -1,7 +1,6 @@
 use std::mem::take;
 
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 use mongodb::bson::{Bson, Document, doc, oid::ObjectId};
 
 use super::{
@@ -9,7 +8,7 @@ use super::{
     parse::{Segment, Statement},
     rules::find,
 };
-use crate::shared::not_allowed;
+use crate::shared::{Connection, not_allowed};
 
 const READS: [&str; 9] = [
     "find",

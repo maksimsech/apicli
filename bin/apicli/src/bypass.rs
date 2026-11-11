@@ -7,12 +7,16 @@ use std::{
     thread,
 };
 
-use fieldkit_common::{Entry, Failure};
-use fieldkit_policy::{Credential, HostPolicy, Origin, Rate, Rule, Vault};
+use fieldkit_common::{Entry, Failure, Rate, Vault};
 use fieldkit_vault::Store;
 use secrecy::SecretString;
 
-use crate::{cli::parse, request::perform};
+use crate::{
+    cli::parse,
+    config::{Config, Credential, HostPolicy, Rule},
+    origin::Origin,
+    request::perform,
+};
 
 const SECRET: &str = "sk-test-1234567890";
 const REPORTS_SECRET: &str = "tok-reports-0987654321";
@@ -90,12 +94,12 @@ fn ok(_: &str) -> String {
     reply("200 OK", "", "ok")
 }
 
-fn vault(origin: &str) -> Vault {
-    vault_with(origin, HostPolicy::default())
+fn config(origin: &str) -> Config {
+    config_with(origin, HostPolicy::default())
 }
 
-fn vault_with(origin: &str, host: HostPolicy) -> Vault {
-    let mut vault = Vault {
+fn config_with(origin: &str, host: HostPolicy) -> Config {
+    let mut config = Config {
         credentials: vec![Credential {
             name: "test".into(),
             origin: Origin::parse(origin).unwrap(),
@@ -104,18 +108,18 @@ fn vault_with(origin: &str, host: HostPolicy) -> Vault {
             template: "{secret}".into(),
             secret: SecretString::from(SECRET),
         }],
-        ..Vault::default()
+        ..Config::default()
     };
-    vault
+    config
         .policy
         .hosts
         .insert(Origin::parse(origin).unwrap(), host);
-    vault
+    config
 }
 
-fn mixed(origin: &str) -> Vault {
-    let mut vault = vault(origin);
-    vault.credentials.push(Credential {
+fn mixed(origin: &str) -> Config {
+    let mut config = config(origin);
+    config.credentials.push(Credential {
         name: "reports".into(),
         origin: Origin::parse(origin).unwrap(),
         paths: vec!["/v1/reports/**".into()],
@@ -123,7 +127,7 @@ fn mixed(origin: &str) -> Vault {
         template: "Bearer {secret}".into(),
         secret: SecretString::from(REPORTS_SECRET),
     });
-    vault
+    config
 }
 
 fn allow(method: &str, path: &str) -> HostPolicy {
@@ -145,7 +149,11 @@ fn store(name: &str) -> Store {
     Store::at(dir)
 }
 
-async fn run(args: &[&str], vault: &Vault, store: &Store) -> (Result<u8, Failure>, String, Entry) {
+async fn run(
+    args: &[&str],
+    config: &Config,
+    store: &Store,
+) -> (Result<u8, Failure>, String, Entry) {
     let cli = parse(
         ["apicli"]
             .iter()
@@ -156,7 +164,9 @@ async fn run(args: &[&str], vault: &Vault, store: &Store) -> (Result<u8, Failure
     .unwrap();
     let mut out = Vec::new();
     let mut entry = Entry::default();
-    let result = perform(&cli.request, store, vault, &mut out, &mut entry).await;
+    let mut vault = Vault::default();
+    config.save(&mut vault).unwrap();
+    let result = perform(&cli.request, store, &vault, config, &mut out, &mut entry).await;
     (result, String::from_utf8_lossy(&out).into_owned(), entry)
 }
 
@@ -173,7 +183,7 @@ async fn echoed_key_is_redacted_everywhere() {
         Server::start(|request| reply("200 OK", &format!("X-Echo: {SECRET}\r\n"), request));
     let url = format!("{}/v1/echo?key={SECRET}", server.origin);
 
-    let (result, out, entry) = run(&["-i", &url], &vault(&server.origin), &store("echo")).await;
+    let (result, out, entry) = run(&["-i", &url], &config(&server.origin), &store("echo")).await;
 
     assert_eq!(code(&result), 0);
     assert!(server.received().contains(&format!("x-api-key: {SECRET}")));
@@ -190,7 +200,7 @@ async fn redirect_to_another_origin_is_not_followed() {
 
     let (result, _, _) = run(
         &["-L", &format!("{}/v1/download", api.origin)],
-        &vault(&api.origin),
+        &config(&api.origin),
         &store("redirect"),
     )
     .await;
@@ -206,7 +216,7 @@ async fn unconfigured_host_receives_nothing() {
 
     let (result, _, _) = run(
         &[&other.origin],
-        &vault(&api.origin),
+        &config(&api.origin),
         &store("unconfigured"),
     )
     .await;
@@ -221,12 +231,12 @@ async fn writes_reach_the_server_only_through_an_allow_rule() {
     let url = format!("{}/v1/orders/1/notes", api.origin);
     let args = ["-X", "POST", "--json", "{\"note\":\"x\"}", url.as_str()];
 
-    let (denied, _, _) = run(&args, &vault(&api.origin), &store("write-denied")).await;
+    let (denied, _, _) = run(&args, &config(&api.origin), &store("write-denied")).await;
 
     assert_eq!(code(&denied), 110);
     assert_eq!(api.count(), 0);
 
-    let allowed = vault_with(&api.origin, allow("POST", "/v1/orders/*/notes"));
+    let allowed = config_with(&api.origin, allow("POST", "/v1/orders/*/notes"));
     let (result, _, _) = run(&args, &allowed, &store("write-allowed")).await;
 
     assert_eq!(code(&result), 0);
@@ -246,7 +256,7 @@ async fn redirect_to_a_denied_path_is_not_followed() {
             ok(request)
         }
     });
-    let allowed = vault_with(&api.origin, allow("POST", "/v1/orders/*/notes"));
+    let allowed = config_with(&api.origin, allow("POST", "/v1/orders/*/notes"));
     let url = format!("{}/v1/orders/1/notes", api.origin);
 
     let (result, _, _) = run(
@@ -266,7 +276,7 @@ async fn agent_cannot_set_the_credential_header() {
 
     let (result, _, _) = run(
         &["-H", "x-api-key: guessed", &api.origin],
-        &vault(&api.origin),
+        &config(&api.origin),
         &store("credential-header"),
     )
     .await;
@@ -278,11 +288,11 @@ async fn agent_cannot_set_the_credential_header() {
 #[tokio::test(flavor = "current_thread")]
 async fn path_scoped_key_is_sent_only_on_its_paths() {
     let api = Server::start(ok);
-    let vault = mixed(&api.origin);
+    let config = mixed(&api.origin);
     let store = store("scoped");
 
-    let (users, _, _) = run(&[&format!("{}/v1/users", api.origin)], &vault, &store).await;
-    let (reports, _, _) = run(&[&format!("{}/v1/reports/1", api.origin)], &vault, &store).await;
+    let (users, _, _) = run(&[&format!("{}/v1/users", api.origin)], &config, &store).await;
+    let (reports, _, _) = run(&[&format!("{}/v1/reports/1", api.origin)], &config, &store).await;
 
     assert_eq!(code(&users), 0);
     assert_eq!(code(&reports), 0);
@@ -320,7 +330,7 @@ async fn proxy_environment_is_ignored() {
         unsafe { env::set_var(name, &proxy.origin) };
     }
 
-    let (result, _, _) = run(&[&api.origin], &vault(&api.origin), &store("proxy")).await;
+    let (result, _, _) = run(&[&api.origin], &config(&api.origin), &store("proxy")).await;
 
     for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "ALL_PROXY"] {
         unsafe { env::remove_var(name) };
@@ -333,7 +343,7 @@ async fn proxy_environment_is_ignored() {
 #[tokio::test(flavor = "current_thread")]
 async fn runaway_loop_is_cut_at_the_rate_limit() {
     let api = Server::start(ok);
-    let limited = vault_with(
+    let limited = config_with(
         &api.origin,
         HostPolicy {
             rate: Some(Rate::parse("3/min").unwrap()),
@@ -357,8 +367,8 @@ async fn upstream_429_blocks_the_host() {
     let api = Server::start(|_| reply("429 Too Many Requests", "Retry-After: 60\r\n", "slow down"));
     let store = store("429");
 
-    let (first, _, _) = run(&[&api.origin], &vault(&api.origin), &store).await;
-    let (second, _, _) = run(&[&api.origin], &vault(&api.origin), &store).await;
+    let (first, _, _) = run(&[&api.origin], &config(&api.origin), &store).await;
+    let (second, _, _) = run(&[&api.origin], &config(&api.origin), &store).await;
 
     assert_eq!(code(&first), 0);
     assert_eq!(code(&second), 111);

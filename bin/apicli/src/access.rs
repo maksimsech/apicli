@@ -1,6 +1,10 @@
-use fieldkit_policy::{Credential, HostPolicy, Origin, Policy, Rule, Vault};
 use percent_encoding::percent_decode_str;
 use url::Url;
+
+use crate::{
+    config::{Config, Credential, HostPolicy, Policy, Rule},
+    origin::Origin,
+};
 
 pub const METHOD_OVERRIDES: [&str; 3] = [
     "x-http-method-override",
@@ -35,7 +39,7 @@ pub fn authorize<'a>(
     url: &Url,
     method: &str,
     body: Option<Body>,
-    vault: &'a Vault,
+    config: &'a Config,
 ) -> Result<(&'a Credential, Grant), Denial> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err(Denial::Userinfo);
@@ -51,20 +55,20 @@ pub fn authorize<'a>(
         return Err(Denial::MethodOverride("_method".into()));
     }
     let origin = Origin::of(url).ok_or_else(|| Denial::Unconfigured(url.to_string()))?;
-    if !vault
+    if !config
         .credentials
         .iter()
         .any(|credential| credential.origin == origin)
     {
         return Err(Denial::Unconfigured(origin.to_string()));
     }
-    let grant = check(&vault.policy.host(&origin), method, url.path(), body)?;
-    let credential = credential(vault, &origin, url.path()).ok_or(Denial::Uncovered)?;
+    let grant = check(&config.policy.host(&origin), method, url.path(), body)?;
+    let credential = credential(config, &origin, url.path()).ok_or(Denial::Uncovered)?;
     Ok((credential, grant))
 }
 
-fn credential<'a>(vault: &'a Vault, origin: &Origin, path: &str) -> Option<&'a Credential> {
-    let mut hosted = vault
+fn credential<'a>(config: &'a Config, origin: &Origin, path: &str) -> Option<&'a Credential> {
+    let mut hosted = config
         .credentials
         .iter()
         .filter(|credential| &credential.origin == origin);
@@ -165,9 +169,6 @@ fn segments(path: &str, loose: bool) -> Vec<String> {
 
 pub fn parse_policy(text: &str) -> Result<Policy, String> {
     let policy: Policy = toml::from_str(text).map_err(|error| error.to_string())?;
-    if policy.log_limit_mb == 0 {
-        return Err("log_limit_mb must be at least 1".into());
-    }
     for (origin, host) in &policy.hosts {
         for method in &host.methods {
             validate_method(method).map_err(|error| format!("{origin}: {error}"))?;
@@ -249,16 +250,16 @@ mod tests {
         }
     }
 
-    fn vault() -> Vault {
-        Vault {
+    fn config() -> Config {
+        Config {
             credentials: vec![credential("example", &[])],
-            ..Vault::default()
+            ..Config::default()
         }
     }
 
     fn authorized(url: &str, method: &str) -> Result<String, Denial> {
-        let vault = vault();
-        authorize(&Url::parse(url).unwrap(), method, None, &vault)
+        let config = config();
+        authorize(&Url::parse(url).unwrap(), method, None, &config)
             .map(|(credential, _)| credential.name.clone())
     }
 
@@ -443,47 +444,47 @@ mod tests {
 
     #[test]
     fn path_scoped_credentials_cover_only_their_paths() {
-        let mut vault = Vault {
+        let mut config = Config {
             credentials: vec![
                 credential("reports", &["/v1/reports/**"]),
                 credential("export", &["/v1/exports/*"]),
             ],
-            ..Vault::default()
+            ..Config::default()
         };
-        let pick = |vault: &Vault, url: &str| {
-            authorize(&Url::parse(url).unwrap(), "GET", None, vault)
+        let pick = |config: &Config, url: &str| {
+            authorize(&Url::parse(url).unwrap(), "GET", None, config)
                 .map(|(credential, _)| credential.name.clone())
         };
 
         assert_eq!(
-            pick(&vault, "https://api.example.com/v1/reports/1/rows"),
+            pick(&config, "https://api.example.com/v1/reports/1/rows"),
             Ok("reports".into())
         );
         assert_eq!(
-            pick(&vault, "https://api.example.com/v1/exports/7"),
+            pick(&config, "https://api.example.com/v1/exports/7"),
             Ok("export".into())
         );
         assert_eq!(
-            pick(&vault, "https://api.example.com/V1/reports/1"),
+            pick(&config, "https://api.example.com/V1/reports/1"),
             Err(Denial::Uncovered)
         );
         assert_eq!(
-            pick(&vault, "https://api.example.com/v1/exports/7/file"),
+            pick(&config, "https://api.example.com/v1/exports/7/file"),
             Err(Denial::Uncovered)
         );
 
-        vault.credentials.push(credential("main", &[]));
+        config.credentials.push(credential("main", &[]));
 
         assert_eq!(
-            pick(&vault, "https://api.example.com/v1/reports"),
+            pick(&config, "https://api.example.com/v1/reports"),
             Ok("reports".into())
         );
         assert_eq!(
-            pick(&vault, "https://api.example.com/v1/users"),
+            pick(&config, "https://api.example.com/v1/users"),
             Ok("main".into())
         );
         assert_eq!(
-            pick(&vault, "https://api.example.com/v1//reports/1"),
+            pick(&config, "https://api.example.com/v1//reports/1"),
             Ok("main".into())
         );
     }
@@ -506,10 +507,10 @@ mod tests {
             .unwrap()
             .join("//attacker.example/collect")
             .unwrap();
-        let vault = vault();
+        let config = config();
 
         assert!(matches!(
-            authorize(&next, "GET", None, &vault),
+            authorize(&next, "GET", None, &config),
             Err(Denial::Unconfigured(_))
         ));
     }

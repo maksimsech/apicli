@@ -12,7 +12,6 @@ publish = false
 [dependencies]
 clap.workspace = true
 fieldkit-common.workspace = true
-fieldkit-policy.workspace = true
 fieldkit-vault.workspace = true
 percent-encoding.workspace = true
 reqwest.workspace = true

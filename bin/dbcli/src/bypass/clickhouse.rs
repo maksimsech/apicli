@@ -1,19 +1,19 @@
-use fieldkit_policy::Vault;
 use fieldkit_vault::Store;
 use secrecy::SecretString;
 
-use super::{Run, Server, limited, run, server, store, vault, writes};
+use super::{Run, Server, config, limited, run, server, store, writes};
+use crate::shared::Config;
 
 fn clickhouse() -> Option<Server> {
     server("DBCLI_TEST_CLICKHOUSE")
 }
 
-async fn sql(query: &str, vault: &Vault, store: &Store) -> Run {
-    run(&["-q", query], vault, store).await
+async fn sql(query: &str, config: &Config, store: &Store) -> Run {
+    run(&["-q", query], config, store).await
 }
 
-async fn setup(server: &Server, table: &str) -> (Vault, Store) {
-    let writer = vault(server, writes);
+async fn setup(server: &Server, table: &str) -> (Config, Store) {
+    let writer = config(server, writes);
     let store = store(table);
     let done = sql(
         &format!(
@@ -27,7 +27,7 @@ async fn setup(server: &Server, table: &str) -> (Vault, Store) {
     (writer, store)
 }
 
-async fn count(table: &str, writer: &Vault, store: &Store) -> String {
+async fn count(table: &str, writer: &Config, store: &Store) -> String {
     sql(&format!("SELECT count() FROM {table}"), writer, store)
         .await
         .out
@@ -41,7 +41,7 @@ async fn refused_flags_never_connect() {
         url: "clickhouse://agent@127.0.0.1:1/default".into(),
         password: "never-sent-123".into(),
     };
-    let writer = vault(&offline, writes);
+    let writer = config(&offline, writes);
     let store = store("clickhouse-refused");
 
     for args in [
@@ -68,7 +68,7 @@ async fn read_only_connection_blocks_every_write() {
     };
     let table = "dbcli_read_only";
     let (writer, store) = setup(&server, table).await;
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
 
     for escape in [
         format!("INSERT INTO {table} VALUES (2, 'x')"),
@@ -131,7 +131,7 @@ async fn password_is_masked_in_output_errors_and_log() {
     let Some(server) = clickhouse() else {
         return;
     };
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
     let store = store("clickhouse-masked");
     let password = server.password.clone();
 
@@ -151,7 +151,7 @@ async fn wrong_password_fails_to_connect_with_a_hint() {
     let Some(server) = clickhouse() else {
         return;
     };
-    let mut wrong = vault(&server, |_| {});
+    let mut wrong = config(&server, |_| {});
     wrong.connections[0].password = SecretString::from("not-the-password");
 
     let done = sql("SELECT 1", &wrong, &store("clickhouse-wrong")).await;
@@ -171,7 +171,7 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
     };
     let table = "dbcli_rate";
     let (writer, setup_store) = setup(&server, table).await;
-    let capped = vault(&server, |connection| {
+    let capped = config(&server, |connection| {
         writes(connection);
         limited("3/min")(connection);
     });

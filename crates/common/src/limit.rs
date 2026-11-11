@@ -3,10 +3,12 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use fieldkit_policy::{Bucket, Limits, Wait};
 use fieldkit_vault::Store;
 
-use crate::Failure;
+use crate::{
+    Failure,
+    rate::{Bucket, Limits, Wait},
+};
 
 pub fn take(
     store: &Store,

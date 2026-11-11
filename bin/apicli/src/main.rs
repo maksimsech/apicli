@@ -2,8 +2,10 @@ mod access;
 #[cfg(test)]
 mod bypass;
 mod cli;
+mod config;
 mod info;
 mod network;
+mod origin;
 mod request;
 mod response;
 mod rules;

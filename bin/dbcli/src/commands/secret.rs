@@ -1,10 +1,10 @@
 use fieldkit_common::{Failure, finish, open_for_change, read_secret};
-use fieldkit_policy::Connection;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::{
     call::parse,
     cli::{SecretCommand, reserved},
+    shared::{Config, Connection},
 };
 
 pub fn unknown(name: &str) -> Failure {
@@ -15,37 +15,41 @@ pub fn unknown(name: &str) -> Failure {
 
 pub fn secret(command: SecretCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("dbcli")?;
+    let mut config = Config::load(&vault)?;
     let message = match command {
         SecretCommand::Add { name, url } => {
             validate(&name)?;
             let url = parse(&url).map_err(Failure::Usage)?.text;
-            if vault.connection(&name).is_some() {
+            if config.connection(&name).is_some() {
                 return Err(Failure::Usage(format!(
                     "{name} already exists, use dbcli secret rotate {name}"
                 )));
             }
             let password = prompt(&name)?;
             let message = format!("Added {name} for {url}, read-only");
-            vault.connections.push(Connection::new(name, url, password));
+            config
+                .connections
+                .push(Connection::new(name, url, password));
             message
         }
         SecretCommand::Rotate { name } => {
             let password = prompt(&name)?;
-            let connection = vault.connection_mut(&name).ok_or_else(|| unknown(&name))?;
+            let connection = config.connection_mut(&name).ok_or_else(|| unknown(&name))?;
             connection.password = password;
             format!("Rotated {name}")
         }
         SecretCommand::Rm { name } => {
-            let count = vault.connections.len();
-            vault
+            let count = config.connections.len();
+            config
                 .connections
                 .retain(|connection| connection.name != name);
-            if vault.connections.len() == count {
+            if config.connections.len() == count {
                 return Err(unknown(&name));
             }
             format!("Removed {name}")
         }
     };
+    config.save(&mut vault)?;
     finish(&store, &vault, &message)
 }
 

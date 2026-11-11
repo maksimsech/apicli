@@ -1,8 +1,9 @@
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 
 use super::rules::find;
-use crate::shared::{Dialect, Statement, Token, not_allowed, quote, split, tokens, word};
+use crate::shared::{
+    Connection, Dialect, Statement, Token, not_allowed, quote, split, tokens, word,
+};
 
 const LOCAL_FILES: &str = "it reads or writes local files";
 const WRITES: [&str; 10] = [

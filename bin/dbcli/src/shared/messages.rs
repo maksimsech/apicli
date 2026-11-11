@@ -1,7 +1,6 @@
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 
-use super::text::quote;
+use super::{config::Connection, text::quote};
 
 pub fn add_hint(name: &str) -> String {
     format!(

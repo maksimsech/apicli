@@ -17,7 +17,6 @@ chrono.workspace = true
 clap.workspace = true
 fallible-iterator = "0.2"
 fieldkit-common.workspace = true
-fieldkit-policy.workspace = true
 fieldkit-vault.workspace = true
 mongodb = { version = "3.10", default-features = false, features = ["compat-3-3-0", "bson-3", "rustls-tls-aws-lc", "dns-resolver"] }
 percent-encoding.workspace = true

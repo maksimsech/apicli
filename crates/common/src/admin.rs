@@ -4,12 +4,14 @@ use std::{
     time::Duration,
 };
 
-use fieldkit_policy::{Admin, Vault};
 use fieldkit_vault::{Store, hash_password, verify_password};
 use rpassword::prompt_password;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::{Failure, PasswordCommand};
+use crate::{
+    Failure, PasswordCommand,
+    vault::{Admin, Vault},
+};
 
 pub fn password(tool: &str, command: PasswordCommand) -> Result<u8, Failure> {
     require_terminal()?;

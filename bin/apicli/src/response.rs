@@ -4,8 +4,7 @@ use std::{
     time::Instant,
 };
 
-use fieldkit_common::{Entry, Failure};
-use fieldkit_policy::Redactor;
+use fieldkit_common::{Entry, Failure, Redactor};
 use reqwest::{Method, Response, Version, header::CONTENT_TYPE};
 
 use crate::{cli::RequestArgs, network::network};

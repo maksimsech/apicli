@@ -1,6 +1,4 @@
-use fieldkit_policy::Allow;
-
-use crate::shared::glob;
+use crate::shared::{Allow, glob};
 
 const TABLE_WRITES: [&str; 4] = ["INSERT", "UPDATE", "DELETE", "TRUNCATE"];
 

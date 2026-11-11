@@ -8,20 +8,22 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use fieldkit_common::{Failure, finish, open_for_change};
-use fieldkit_policy::{Origin, Policy, Rate, Rule, Vault};
+use fieldkit_common::{Failure, Rate, finish, open_for_change};
 use fieldkit_vault::Store;
 
 use crate::{
     access::{parse_policy, policy_toml, validate_rule},
     cli::{AllowCommand, DenyCommand, LimitCommand, PolicyCommand},
+    config::{Config, Policy, Rule},
+    origin::Origin,
 };
 
 const DEFAULT_EDITOR: &str = if cfg!(windows) { "notepad" } else { "vi" };
 
 pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("apicli")?;
-    let policy = &mut vault.policy;
+    let mut config = Config::load(&vault)?;
+    let policy = &mut config.policy;
     let message = match command {
         AllowCommand::Add {
             host,
@@ -59,12 +61,14 @@ pub fn allow(command: AllowCommand) -> Result<u8, Failure> {
             )
         }
     };
+    config.save(&mut vault)?;
     finish(&store, &vault, &message)
 }
 
 pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("apicli")?;
-    let policy = &mut vault.policy;
+    let mut config = Config::load(&vault)?;
+    let policy = &mut config.policy;
     let message = match command {
         DenyCommand::Add { host, method, path } => {
             let origin = Origin::parse(&host).map_err(Failure::Usage)?;
@@ -95,12 +99,14 @@ pub fn deny(command: DenyCommand) -> Result<u8, Failure> {
             )
         }
     };
+    config.save(&mut vault)?;
     finish(&store, &vault, &message)
 }
 
 pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
     let (store, mut vault) = open_for_change("apicli")?;
-    let policy = &mut vault.policy;
+    let mut config = Config::load(&vault)?;
+    let policy = &mut config.policy;
     let message = match command {
         LimitCommand::Set {
             host,
@@ -133,22 +139,25 @@ pub fn limit(command: LimitCommand) -> Result<u8, Failure> {
             format!("Removed the limits on {origin}")
         }
     };
+    config.save(&mut vault)?;
     finish(&store, &vault, &message)
 }
 
 pub fn policy(command: PolicyCommand) -> Result<u8, Failure> {
     match command {
         PolicyCommand::Show => {
-            let vault = Store::open()?.load()?;
+            let config = Config::load(&Store::open()?.load()?)?;
             print!(
                 "{}",
-                policy_toml(&effective(&vault)).map_err(Failure::Integrity)?
+                policy_toml(&effective(&config)).map_err(Failure::Integrity)?
             );
             Ok(0)
         }
         PolicyCommand::Edit => {
             let (store, mut vault) = open_for_change("apicli")?;
-            vault.policy = edit(&effective(&vault))?;
+            let mut config = Config::load(&vault)?;
+            config.policy = edit(&effective(&config))?;
+            config.save(&mut vault)?;
             finish(&store, &vault, "Saved the policy")
         }
     }
@@ -170,9 +179,9 @@ fn remove(rules: Option<&mut Vec<Rule>>, method: &str, path: &str) -> Result<(),
     Ok(())
 }
 
-fn effective(vault: &Vault) -> Policy {
-    let mut policy = vault.policy.clone();
-    for credential in &vault.credentials {
+fn effective(config: &Config) -> Policy {
+    let mut policy = config.policy.clone();
+    for credential in &config.credentials {
         policy.hosts.entry(credential.origin.clone()).or_default();
     }
     policy

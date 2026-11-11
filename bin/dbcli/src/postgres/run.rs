@@ -1,5 +1,4 @@
 use fieldkit_common::Failure;
-use fieldkit_policy::Connection;
 
 use super::{
     args::{PsqlArgs, parse},
@@ -7,7 +6,7 @@ use super::{
     meta::{self, Meta},
     output::{Options, Table, render},
 };
-use crate::shared::{COMMITS, ConnectionUrl, Context, flag, read_only, writes};
+use crate::shared::{COMMITS, Connection, ConnectionUrl, Context, flag, read_only, writes};
 
 const TAGGED: [&str; 4] = ["INSERT", "UPDATE", "DELETE", "MERGE"];
 

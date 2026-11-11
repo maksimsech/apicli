@@ -1,14 +1,14 @@
-use fieldkit_policy::Vault;
 use fieldkit_vault::Store;
 
-use super::{Server, limited, run, server, store, vault, writes};
+use super::{Server, config, limited, run, server, store, writes};
+use crate::shared::Config;
 
 fn postgres() -> Option<Server> {
     server("DBCLI_TEST_POSTGRES")
 }
 
-async fn setup(server: &Server, table: &str) -> (Vault, Store) {
-    let writer = vault(server, writes);
+async fn setup(server: &Server, table: &str) -> (Config, Store) {
+    let writer = config(server, writes);
     let store = store(table);
     let done = run(
         &[
@@ -31,7 +31,7 @@ async fn setup(server: &Server, table: &str) -> (Vault, Store) {
     (writer, store)
 }
 
-async fn count(table: &str, writer: &Vault, store: &Store) -> String {
+async fn count(table: &str, writer: &Config, store: &Store) -> String {
     let done = run(
         &["-At", "-c", &format!("SELECT count(*) FROM {table}")],
         writer,
@@ -45,7 +45,7 @@ async fn count(table: &str, writer: &Vault, store: &Store) -> String {
 async fn unconfigured_connection_is_refused() {
     let done = run(
         &["-c", "select 1"],
-        &Vault::default(),
+        &Config::default(),
         &store("unconfigured"),
     )
     .await;
@@ -60,7 +60,7 @@ async fn read_only_connection_blocks_every_write() {
     };
     let table = "dbcli_read_only";
     let (writer, store) = setup(&server, table).await;
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
     let escapes: Vec<Vec<String>> = [
         vec!["INSERT INTO {t} (note) VALUES ('x')"],
         vec!["DELETE FROM {t}"],
@@ -131,7 +131,7 @@ async fn writes_on_a_read_only_connection_are_denied_with_a_hint() {
 
     let done = run(
         &["-c", &format!("UPDATE {table} SET note = 'x'")],
-        &vault(&server, |_| {}),
+        &config(&server, |_| {}),
         &store,
     )
     .await;
@@ -193,7 +193,7 @@ async fn password_is_masked_in_output_errors_and_log() {
     let Some(server) = postgres() else {
         return;
     };
-    let reader = vault(&server, |_| {});
+    let reader = config(&server, |_| {});
     let store = store("masked");
     let password = server.password.as_str();
 
@@ -226,7 +226,7 @@ async fn runaway_loop_is_cut_at_the_rate_limit() {
     };
     let table = "dbcli_rate";
     let (writer, setup_store) = setup(&server, table).await;
-    let capped = vault(&server, |connection| {
+    let capped = config(&server, |connection| {
         writes(connection);
         limited("3/min")(connection);
     });
